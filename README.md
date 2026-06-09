@@ -112,3 +112,16 @@ sudo make install
 
 ## License
 This project is licensed under the MIT License. See [LICENSE](LICENSE) for details.
+
+### Installation
+
+```bash
+# Clone mã nguồn từ GitHub về máy
+git clone [https://github.com/dangnhatphi001-vibe-AI/vietnamesekey.git](https://github.com/dangnhatphi001-vibe-AI/vietnamesekey.git)
+cd vietnamesekey
+
+# Biên dịch và cài đặt
+mkdir -p build && cd build
+cmake -DCMAKE_BUILD_TYPE=Release ..
+make -j$(nproc)
+sudo make install

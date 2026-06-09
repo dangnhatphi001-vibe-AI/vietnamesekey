@@ -1,0 +1,21 @@
+Source: vietnamesekey
+Section: utils
+Priority: optional
+Maintainer: Your Name <youremail@example.com>
+Build-Depends: debhelper-compat (= 13),
+               cmake,
+               g++,
+               extra-cmake-modules,
+               libfcitx5core-dev,
+               libfcitx5utils-dev
+Standards-Version: 4.5.1
+Homepage: https://github.com/yourusername/vietnamesekey
+
+Package: vietnamesekey
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, fcitx5
+Description: Ultra-optimized zero-dynamic-allocation C++17 Vietnamese IME for Fcitx5
+ An ultra-optimized, zero-dynamic-allocation C++17 Vietnamese Input Method
+ Engine (IME) addon for the Fcitx5 framework on Linux. Designed for power
+ users who demand microsecond-level input response latency and zero memory
+ fragmentation.

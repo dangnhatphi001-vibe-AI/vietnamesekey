@@ -1,6 +1,9 @@
 #include "shadow_engine.h"
 #include "vn_constants.h"
 
+// Standing bitmask for standalone 'w' key insertion
+static constexpr uint32_t MOD_STANDALONE_W = 1u << 9;
+
 // ──────────────────────────────────────────────────────────────────────────────
 //  Utility
 // ──────────────────────────────────────────────────────────────────────────────
@@ -279,29 +282,41 @@ bool ShadowEngine::handle_telex(char32_t keycode, char32_t lower_key, bool has_v
         }
 
         // Priority 3: Double-key bypass.
-        // Revert last modification made by 'w' if any, then insert literal 'w'.
+        // Revert last modification made by 'w' if any, then insert/replace.
         if (last_mod_key == U'w' && last_mod_target >= 0) {
             const char32_t target_char = lower32(word_buffer[last_mod_target]);
-            if (target_char == U'u' || target_char == U'o') {
-                for (size_t i = 0; i < buffer_length; ++i) {
-                    const char32_t l = lower32(word_buffer[i]);
-                    if (l == U'u' || l == U'o') char_mod[i] &= ~MOD_HOOK;
+            if (char_mod[last_mod_target] & MOD_STANDALONE_W) {
+                if (last_mod_target == 0) {
+                    // Revert standalone 'w' at start of word to literal 'w'
+                    word_buffer[0] = (word_buffer[0] == U'U') ? U'W' : U'w';
+                    char_mod[0] = 0u;
+                } else {
+                    // Revert standalone 'w' in middle of word to 'u' + 'w'
+                    char_mod[last_mod_target] &= ~(MOD_HOOK | MOD_STANDALONE_W);
+                    if (buffer_length < 32) word_buffer[buffer_length++] = keycode;
                 }
-            } else if (target_char == U'a') {
-                for (size_t i = 0; i < buffer_length; ++i) {
-                    if (lower32(word_buffer[i]) == U'a') char_mod[i] &= ~MOD_BREVE;
+            } else {
+                if (target_char == U'u' || target_char == U'o') {
+                    for (size_t i = 0; i < buffer_length; ++i) {
+                        const char32_t l = lower32(word_buffer[i]);
+                        if (l == U'u' || l == U'o') char_mod[i] &= ~MOD_HOOK;
+                    }
+                } else if (target_char == U'a') {
+                    for (size_t i = 0; i < buffer_length; ++i) {
+                        if (lower32(word_buffer[i]) == U'a') char_mod[i] &= ~MOD_BREVE;
+                    }
                 }
+                if (buffer_length < 32) word_buffer[buffer_length++] = keycode;
             }
             last_mod_key    = U'\0';
             last_mod_target = -1;
-            if (buffer_length < 32) word_buffer[buffer_length++] = keycode;
             return true;
         }
 
-        // Priority 4: standalone 'w' → insert u with MOD_HOOK (ư).
+        // Priority 4: standalone 'w' → insert u with MOD_HOOK and MOD_STANDALONE_W (ư).
         if (buffer_length < 32) {
             word_buffer[buffer_length] = (keycode == U'W') ? U'U' : U'u';
-            char_mod[buffer_length]    = MOD_HOOK;
+            char_mod[buffer_length]    = MOD_HOOK | MOD_STANDALONE_W;
             last_mod_key    = U'w';
             last_mod_target = static_cast<int>(buffer_length);
             buffer_length++;

@@ -6,5 +6,5 @@ CXX_DEFINES = -Dvietnamesekey_EXPORTS
 
 CXX_INCLUDES = -I/media/dang-nhat-phi/android/vietnamesekey/include -isystem /usr/include/Fcitx5/Core -isystem /usr/include/Fcitx5/Config -isystem /usr/include/Fcitx5/Utils
 
-CXX_FLAGS = -O3 -DNDEBUG -std=c++17 -fPIC -O3 -flto -fno-rtti -Wall -Wextra -Wpedantic -march=native
+CXX_FLAGS = -O3 -DNDEBUG -std=gnu++17 -fPIC -O3 -march=native -flto -fno-exceptions -Wall -Wextra
 

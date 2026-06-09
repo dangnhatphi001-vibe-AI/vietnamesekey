@@ -1,6 +1,5 @@
 // vietnamesekey_fcitx.cpp
 // Fcitx5 plugin wrapper for the ShadowEngine Vietnamese composition engine.
-// Implements full lifecycle: keyEvent, reset (focus-in reset), deactivate (focus-out commit).
 
 #include <fcitx/addonfactory.h>
 #include <fcitx/addoninstance.h>
@@ -20,11 +19,10 @@
 // ============================================================
 //  UTF-32 → UTF-8 encoder
 //  Hand-crafted bit-shifting on a stack array; zero allocation.
-//  Returns number of bytes written into dst[].
 // ============================================================
 static inline size_t encode_utf8(const char32_t* __restrict__ src,
                                   size_t                        src_len,
-                                  char*       __restrict__     dst,
+                                  char* __restrict__     dst,
                                   size_t                        dst_cap) {
     size_t n = 0;
     for (size_t i = 0; i < src_len; ++i) {
@@ -60,26 +58,20 @@ public:
     explicit VietnameseKeyEngine(fcitx::Instance* instance)
         : instance_(instance) {}
 
-    // --------------------------------------------------------
-    //  keyEvent — hot path, called on every key-press.
-    // --------------------------------------------------------
     void keyEvent(const fcitx::InputMethodEntry& entry,
                   fcitx::KeyEvent&               ke) override {
 
-        // Key release events carry no composition meaning.
         if (ke.isRelease()) return;
 
         fcitx::InputContext* ic = ke.inputContext();
         if (!ic) return;
 
-        // Detect input mode from the registered IME unique name.
         const uint8_t mode =
             (entry.uniqueName() == "vietnamesekey-vni") ? 1u : 0u;
 
         const FcitxKeySym      sym    = ke.key().sym();
         const fcitx::KeyStates states = ke.key().states();
 
-        // ---- Modifier shortcuts (Ctrl/Alt/Super) → commit + pass through.
         const bool has_ctrl_alt_super =
             (states & fcitx::KeyState::Ctrl)  ||
             (states & fcitx::KeyState::Alt)   ||
@@ -87,28 +79,23 @@ public:
 
         if (has_ctrl_alt_super) {
             commit_pending(ic);
-            return;   // do NOT call filterAndAccept(); let the shortcut pass
+            return;
         }
 
-        // ---- Escape:
-        //   With composition → discard silently and SWALLOW Escape (filterAndAccept).
-        //   Without composition → pass Escape through to the application.
         if (sym == FcitxKey_Escape) {
             if (engine_.has_composition()) {
                 engine_.reset();
                 clear_preedit(ic);
-                ke.filterAndAccept();   // swallow: app should not also react to Escape
+                ke.filterAndAccept();
             }
             return;
         }
 
-        // ---- Enter / Return: commit then let Enter reach the application.
         if (sym == FcitxKey_Return || sym == FcitxKey_KP_Enter) {
             commit_pending(ic);
-            return;   // pass Enter through
+            return;
         }
 
-        // ---- BackSpace handled specially: try to erase one composition char.
         if (sym == FcitxKey_BackSpace) {
             if (engine_.has_composition()) {
                 char32_t obuf[32];
@@ -119,25 +106,22 @@ public:
                 } else {
                     clear_preedit(ic);
                 }
-                ke.filterAndAccept();   // eat the BackSpace; preedit updated above
+                ke.filterAndAccept();
                 return;
             }
-            return;   // no composition: let BackSpace propagate normally
+            return;
         }
 
-        // ---- Non-ASCII / function keys: commit + pass through.
         if (sym < 32 || sym > 126) {
             commit_pending(ic);
             return;
         }
 
-        // ---- Space and punctuation: commit + pass through.
         if (ShadowEngine::is_word_break(static_cast<char32_t>(sym), mode)) {
             commit_pending(ic);
-            return;   // pass the character through
+            return;
         }
 
-        // ---- Feed the key to the composition engine.
         char32_t obuf[32];
         size_t   olen = 0;
         const bool handled =
@@ -156,10 +140,8 @@ public:
         }
     }
 
-    // --------------------------------------------------------
-    //  reset() — called by Fcitx5 when the IC needs a clean slate
-    //  while still focused (e.g. programmatic reset from another addon).
-    // --------------------------------------------------------
+    void activate(const fcitx::InputMethodEntry&, fcitx::InputContextEvent&) override {}
+
     void reset(const fcitx::InputMethodEntry&,
                fcitx::InputContextEvent& ev) override {
         fcitx::InputContext* ic = ev.inputContext();
@@ -167,11 +149,6 @@ public:
         if (ic) clear_preedit(ic);
     }
 
-    // --------------------------------------------------------
-    //  deactivate() — called when the user switches away from this IM,
-    //  changes focus to another window, or clicks the cursor elsewhere.
-    //  Commit any pending composition so text is not lost.
-    // --------------------------------------------------------
     void deactivate(const fcitx::InputMethodEntry& entry,
                     fcitx::InputContextEvent&       ev) override {
         fcitx::InputContext* ic = ev.inputContext();
@@ -183,15 +160,17 @@ public:
             engine_.reset();
             clear_preedit(ic);
         }
-        // Also call the base implementation for any housekeeping it does.
         InputMethodEngineV2::deactivate(entry, ev);
+    }
+
+    std::string subModeLabelImpl(const fcitx::InputMethodEntry&, fcitx::InputContext&) override {
+        return "";
     }
 
 private:
     fcitx::Instance* instance_;
     ShadowEngine     engine_;
 
-    // ---- Commit the pending composition (if any) without filtering. ----
     void commit_pending(fcitx::InputContext* ic) {
         if (!engine_.has_composition()) return;
         char32_t obuf[32];
@@ -202,39 +181,43 @@ private:
         clear_preedit(ic);
     }
 
-    // ---- Encode obuf as UTF-8 and commit to the application. ----------
     void commit_utf32(fcitx::InputContext* ic,
                       const char32_t* obuf, size_t olen) {
         if (olen == 0) return;
-        // UTF-32 Vietnamese syllable → at most 3 UTF-8 bytes each, plus null.
-        char utf8[128];
+        char utf8[256];
         const size_t nb = encode_utf8(obuf, olen, utf8, sizeof(utf8) - 1);
         utf8[nb] = '\0';
-        // commitString requires const std::string&; construct on stack via SSO.
         ic->commitString(std::string(utf8, nb));
     }
 
-    // ---- Set the preedit to the current obuf. --------------------------
+    // ============================================================
+    // FIXED PREEDIT LOGIC: Underline flag + UI Update explicitly
+    // ============================================================
     void update_preedit(fcitx::InputContext* ic,
                         const char32_t* obuf, size_t olen) {
-        char utf8[128];
+        char utf8[256];
         const size_t nb = encode_utf8(obuf, olen, utf8, sizeof(utf8) - 1);
         utf8[nb] = '\0';
-        fcitx::Text txt(std::string(utf8, nb));
-        txt.setCursor(static_cast<int>(nb));   // cursor at end of preedit
+
+        fcitx::Text txt;
+        // Bắt buộc phải có format Underline để GTK/Qt/Chrome hiển thị chữ đang gõ
+        txt.append(std::string(utf8, nb), fcitx::TextFormatFlag::Underline);
+
         ic->inputPanel().setPreedit(txt);
         ic->updatePreedit();
+        // Ép Fcitx5 vẽ lại bảng InputPanel
+        ic->updateUserInterface(fcitx::UserInterfaceComponent::InputPanel);
     }
 
-    // ---- Clear preedit panel. ------------------------------------------
     void clear_preedit(fcitx::InputContext* ic) {
         ic->inputPanel().setPreedit(fcitx::Text());
         ic->updatePreedit();
+        ic->updateUserInterface(fcitx::UserInterfaceComponent::InputPanel);
     }
 };
 
 // ============================================================
-//  Addon factory — the single export required by Fcitx5.
+//  Addon factory
 // ============================================================
 class VietnameseKeyFactory final : public fcitx::AddonFactory {
 public:

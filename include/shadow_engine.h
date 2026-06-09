@@ -65,6 +65,10 @@ private:
     // Mode-specific rule handlers. Return true if the key was consumed as a rule.
     bool handle_telex(char32_t keycode, char32_t lower_key, bool has_vowel);
     bool handle_vni  (char32_t keycode, bool has_vowel);
+
+    // Lookbehind and Vowel/Tone handlers
+    bool apply_lookbehind_consonant(char32_t keycode, char32_t lower_key, uint8_t mode);
+    bool apply_vowel_tone(char32_t keycode, char32_t lower_key, uint8_t mode, bool has_vowel);
 };
 
 #endif // SHADOW_ENGINE_H

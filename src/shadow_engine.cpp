@@ -27,7 +27,7 @@ void ShadowEngine::reset_state() {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-//  Vowel classifier
+//  Vowel classifier & Word Break Utility
 // ──────────────────────────────────────────────────────────────────────────────
 bool ShadowEngine::is_vowel(char32_t c) const {
     const char32_t l = lower32(c);
@@ -50,17 +50,6 @@ bool ShadowEngine::is_word_break(char32_t keycode, uint8_t mode) {
 
 // ──────────────────────────────────────────────────────────────────────────────
 //  Tone-target resolution — full modern Vietnamese placement rules
-//
-//  Rules (in priority order):
-//    1. qu- / gi- onset clusters: treat position-1 char as consonant glide.
-//    2. 1 effective vowel → use it.
-//    3. 2 effective vowels:
-//       a. oa / oe / uy                        → 2nd vowel  (open or closed)
-//       b. closed syllable (final consonant)    → 2nd vowel
-//       c. open syllable                        → 1st vowel
-//    4. 3 effective vowels:
-//       a. u-y-e (uyê cluster: tuyết, chuyện)  → 3rd vowel (ê)
-//       b. all other triphthongs                → middle (2nd) vowel
 // ──────────────────────────────────────────────────────────────────────────────
 int ShadowEngine::find_tone_target() const {
     int    vidx[32];
@@ -138,10 +127,46 @@ void ShadowEngine::get_composition(char32_t* output_str, size_t& out_len) const 
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
+//  Lookbehind Interception Helpers
+// ──────────────────────────────────────────────────────────────────────────────
+bool ShadowEngine::apply_lookbehind_consonant(char32_t keycode, char32_t lower_key, uint8_t mode) {
+    if (buffer_length == 0) return false;
+
+    // Intercept modifier for initial 'd' at index 0 ( Telex 'd' or VNI '9' )
+    if (lower32(word_buffer[0]) == U'd') {
+        const bool is_telex_d = (mode == 0 && lower_key == U'd');
+        const bool is_vni_9   = (mode == 1 && keycode == U'9');
+
+        if (is_telex_d || is_vni_9) {
+            if (!(char_mod[0] & MOD_D)) {
+                char_mod[0] |= MOD_D;
+                last_mod_key    = is_telex_d ? U'd' : U'9';
+                last_mod_target = 0;
+            } else {
+                // Undo logic: revert 'đ' to 'd' and append the new modifier key
+                char_mod[0] &= ~MOD_D;
+                last_mod_key    = U'\0';
+                last_mod_target = -1;
+                if (buffer_length < 32) word_buffer[buffer_length++] = keycode;
+            }
+            return true;
+        }
+    }
+    return false;
+}
+
+bool ShadowEngine::apply_vowel_tone(char32_t keycode, char32_t lower_key, uint8_t mode, bool has_vowel) {
+    if (mode == 0) {
+        return handle_telex(keycode, lower_key, has_vowel);
+    } else {
+        return handle_vni(keycode, has_vowel);
+    }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
 //  Telex rule handler
 // ──────────────────────────────────────────────────────────────────────────────
 bool ShadowEngine::handle_telex(char32_t keycode, char32_t lower_key, bool has_vowel) {
-
     // ── Tone keys: s=sắc  f=huyền  r=hỏi  x=ngã  j=nặng ────────────────────
     uint32_t target_tone = TONE_NONE;
     if      (lower_key == U's') target_tone = TONE_SAC;
@@ -177,7 +202,6 @@ bool ShadowEngine::handle_telex(char32_t keycode, char32_t lower_key, bool has_v
             last_mod_target = -1;
             if (buffer_length < 32) word_buffer[buffer_length++] = keycode;
         } else {
-            // BUG 6 FIX: HAT is mutually exclusive with BREVE (for 'a') and HOOK (for 'o').
             // Clear conflicting modifiers before setting HAT.
             if (lower_key == U'a') char_mod[target] &= ~MOD_BREVE;
             if (lower_key == U'o') char_mod[target] &= ~MOD_HOOK;
@@ -292,7 +316,6 @@ bool ShadowEngine::handle_telex(char32_t keycode, char32_t lower_key, bool has_v
 //  VNI rule handler
 // ──────────────────────────────────────────────────────────────────────────────
 bool ShadowEngine::handle_vni(char32_t keycode, bool has_vowel) {
-
     // ── Tone keys: 1=sắc  2=huyền  3=hỏi  4=ngã  5=nặng ────────────────────
     uint32_t target_tone = TONE_NONE;
     if      (keycode == U'1') target_tone = TONE_SAC;
@@ -328,7 +351,6 @@ bool ShadowEngine::handle_vni(char32_t keycode, bool has_vowel) {
                 last_mod_target = -1;
                 if (buffer_length < 32) word_buffer[buffer_length++] = keycode;
             } else {
-                // BUG 6 FIX: clear conflicting modifiers before applying HAT.
                 if (lower32(word_buffer[hat_target]) == U'a') char_mod[hat_target] &= ~MOD_BREVE;
                 if (lower32(word_buffer[hat_target]) == U'o') char_mod[hat_target] &= ~MOD_HOOK;
                 char_mod[hat_target] |= MOD_HAT;
@@ -337,7 +359,6 @@ bool ShadowEngine::handle_vni(char32_t keycode, bool has_vowel) {
             }
             return true;
         }
-        // No eligible target: return false so process_key can treat as word-break.
         return false;
     }
 
@@ -359,8 +380,6 @@ bool ShadowEngine::handle_vni(char32_t keycode, bool has_vowel) {
                 last_mod_target = -1;
                 if (buffer_length < 32) word_buffer[buffer_length++] = keycode;
             } else {
-                // Apply to target and extend left through contiguous u/o cluster.
-                // BUG 6 FIX: MOD_HOOK on 'o' is mutually exclusive with MOD_HAT.
                 char_mod[hook_target] |= MOD_HOOK;
                 char_mod[hook_target] &= ~MOD_HAT;
                 for (int i = hook_target - 1; i >= 0; --i) {
@@ -375,7 +394,6 @@ bool ShadowEngine::handle_vni(char32_t keycode, bool has_vowel) {
             }
             return true;
         }
-        // No eligible target: return false so process_key can treat as word-break.
         return false;
     }
 
@@ -395,7 +413,6 @@ bool ShadowEngine::handle_vni(char32_t keycode, bool has_vowel) {
                 last_mod_target = -1;
                 if (buffer_length < 32) word_buffer[buffer_length++] = keycode;
             } else {
-                // BUG 6 FIX: MOD_BREVE on 'a' is mutually exclusive with MOD_HAT.
                 char_mod[breve_target] |= MOD_BREVE;
                 char_mod[breve_target] &= ~MOD_HAT;
                 last_mod_key    = U'8';
@@ -403,7 +420,6 @@ bool ShadowEngine::handle_vni(char32_t keycode, bool has_vowel) {
             }
             return true;
         }
-        // No eligible target: return false so process_key can treat as word-break.
         return false;
     }
 
@@ -427,7 +443,6 @@ bool ShadowEngine::handle_vni(char32_t keycode, bool has_vowel) {
             }
             return true;
         }
-        // No eligible target: return false so process_key can treat as word-break.
         return false;
     }
 
@@ -441,26 +456,20 @@ bool ShadowEngine::process_key(char32_t keycode, uint8_t mode,
                                 char32_t* output_str, size_t& out_len) {
 
     // ── 1. Smart Backspace ───────────────────────────────────────────────────
-    // UX: if a tone is pending, remove tone first (composition chars unchanged).
-    //     If no tone, remove the last raw character.
-    // This matches the behaviour of ibus-bamboo / EVkey.
     if (keycode == 8 || keycode == 127) {
         if (buffer_length == 0 && current_tone == TONE_NONE) {
             out_len = 0;
-            return false;   // nothing to erase; pass BackSpace through
+            return false;   // pass BackSpace through
         }
 
         if (current_tone != TONE_NONE) {
-            // Smart: erase tone mark, keep buffer intact.
             current_tone  = TONE_NONE;
             last_tone_key = U'\0';
         } else {
-            // Erase the last character.
             const int del = static_cast<int>(buffer_length) - 1;
             buffer_length--;
             char_mod[del] = 0u;
 
-            // If the deleted position was the last mod target, clear mod tracking.
             if (last_mod_target == del) {
                 last_mod_target = -1;
                 last_mod_key    = U'\0';
@@ -485,24 +494,25 @@ bool ShadowEngine::process_key(char32_t keycode, uint8_t mode,
         return false;
     }
 
-    // ── 4. Buffer capacity guard ─────────────────────────────────────────────
-    if (buffer_length >= 32) {
+    // ── 4. Lookbehind Interception for Consonants (e.g. initial 'd' to 'đ') ──
+    const char32_t lower_key = lower32(keycode);
+    bool consumed = apply_lookbehind_consonant(keycode, lower_key, mode);
+
+    // ── 5. Vowel Tone & Modifiers ────────────────────────────────────────────
+    if (!consumed) {
+        bool has_vowel = false;
+        for (size_t i = 0; i < buffer_length; ++i) {
+            if (is_vowel(word_buffer[i])) { has_vowel = true; break; }
+        }
+        consumed = apply_vowel_tone(keycode, lower_key, mode, has_vowel);
+    }
+
+    // ── 6. Buffer capacity guard ─────────────────────────────────────────────
+    if (!consumed && buffer_length >= 32) {
         reconstruct_word(output_str, out_len);
         reset_state();
         return false;
     }
-
-    // ── 5. Check if buffer contains at least one vowel ──────────────────────
-    bool has_vowel = false;
-    for (size_t i = 0; i < buffer_length; ++i) {
-        if (is_vowel(word_buffer[i])) { has_vowel = true; break; }
-    }
-
-    // ── 6. Mode-specific rule application ───────────────────────────────────
-    const char32_t lower_key = lower32(keycode);
-    bool consumed = (mode == 0)
-                    ? handle_telex(keycode, lower_key, has_vowel)
-                    : handle_vni  (keycode, has_vowel);
 
     // ── 7. Issue 12 FIX: VNI modifier digits (6-9) with no eligible target ───
     if (!consumed && mode == 1) {

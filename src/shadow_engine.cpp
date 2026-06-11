@@ -269,17 +269,13 @@ bool ShadowEngine::handle_telex(char32_t keycode, char32_t lower_key, bool has_v
             char_mod[hook_target] |= MOD_HOOK;
             char_mod[hook_target] &= ~MOD_HAT;  // ô and ơ cannot coexist
             
-            // Propagate hook to preceding 'u' or 'o', unless it is 'o' at the end of the buffer (e.g. 'thuo')
-            const char32_t target_char = lower32(word_buffer[hook_target]);
-            const bool is_o_at_end = (target_char == U'o' && hook_target + 1 == static_cast<int>(buffer_length));
-            if (!is_o_at_end) {
-                for (int i = hook_target - 1; i >= 0; --i) {
-                    const char32_t l = lower32(word_buffer[i]);
-                    if (l == U'u' || l == U'o') {
-                        char_mod[i] |= MOD_HOOK;
-                        char_mod[i] &= ~MOD_HAT;
-                    } else break;
-                }
+            // Propagate hook to preceding 'u' or 'o' immediately
+            for (int i = hook_target - 1; i >= 0; --i) {
+                const char32_t l = lower32(word_buffer[i]);
+                if (l == U'u' || l == U'o') {
+                    char_mod[i] |= MOD_HOOK;
+                    char_mod[i] &= ~MOD_HAT;
+                } else break;
             }
             last_mod_key    = U'w';
             last_mod_target = hook_target;
@@ -555,19 +551,6 @@ bool ShadowEngine::process_key(char32_t keycode, uint8_t mode,
 
     // ── 8. Raw character push (not consumed by any rule) ─────────────────────
     if (!consumed) {
-        // If we are pushing a consonant (non-vowel), propagate hook from 'ơ' to preceding 'u'
-        if (!is_vowel(keycode)) {
-            if (buffer_length >= 2) {
-                const size_t idx_u = buffer_length - 2;
-                const size_t idx_o = buffer_length - 1;
-                if (lower32(word_buffer[idx_u]) == U'u' && lower32(word_buffer[idx_o]) == U'o') {
-                    if ((char_mod[idx_o] & MOD_HOOK) && !(char_mod[idx_u] & MOD_HOOK)) {
-                        char_mod[idx_u] |= MOD_HOOK;
-                    }
-                }
-            }
-        }
-
         word_buffer[buffer_length] = keycode;
         char_mod[buffer_length]    = 0u;
         buffer_length++;

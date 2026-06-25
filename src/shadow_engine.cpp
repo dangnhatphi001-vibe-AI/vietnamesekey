@@ -83,9 +83,9 @@ int ShadowEngine::find_tone_target() const {
         const char32_t v0 = lower32(word_buffer[vidx[0]]);
         const char32_t v1 = lower32(word_buffer[vidx[1]]);
         if ((v0 == U'o' && (v1 == U'a' || v1 == U'e')) ||
-            (v0 == U'u' &&  v1 == U'y') ||
-            (v0 == U'u' &&  v1 == U'o')) {
-            return vidx[1];   // oa / oe / uy / uo → 2nd vowel always
+            (v0 == U'u' && (v1 == U'a' || v1 == U'o')) ||
+            (v0 == U'i' && v1 == U'a')) {
+            return vidx[1];   // oa / oe / ua / uo / ia → 2nd vowel always
         }
         if (static_cast<size_t>(vidx[1]) < buffer_length - 1) {
             return vidx[1];   // closed syllable → 2nd vowel
@@ -242,11 +242,9 @@ bool ShadowEngine::handle_telex(char32_t keycode, char32_t lower_key, bool has_v
         for (int i = static_cast<int>(buffer_length) - 1; i >= 0; --i) {
             const char32_t l = lower32(word_buffer[i]);
             if ((l == U'u' || l == U'o') && !(char_mod[i] & MOD_HOOK)) {
-                // Exception 1: Skip 'o' if followed by 'a' (e.g. 'hoac')
                 if (l == U'o' && i + 1 < static_cast<int>(buffer_length) && lower32(word_buffer[i + 1]) == U'a') {
                     continue;
                 }
-                // Exception 2: Skip final 'u' in 'uou' cluster (e.g. 'huou')
                 if (l == U'u' && i >= 2 && lower32(word_buffer[i - 1]) == U'o' && lower32(word_buffer[i - 2]) == U'u') {
                     continue;
                 }
@@ -255,7 +253,6 @@ bool ShadowEngine::handle_telex(char32_t keycode, char32_t lower_key, bool has_v
             }
         }
 
-        // Find rightmost 'a' that doesn't have MOD_BREVE yet.
         int breve_target = -1;
         for (int i = static_cast<int>(buffer_length) - 1; i >= 0; --i) {
             if (lower32(word_buffer[i]) == U'a' && !(char_mod[i] & MOD_BREVE)) {
@@ -265,11 +262,11 @@ bool ShadowEngine::handle_telex(char32_t keycode, char32_t lower_key, bool has_v
         }
 
         // Priority 1: apply MOD_HOOK to rightmost unmodified u or o.
-        if (hook_target >= 0) {
+        // Only if buffer already has a vowel (not starting English words with w)
+        if (hook_target >= 0 && has_vowel) {
             char_mod[hook_target] |= MOD_HOOK;
-            char_mod[hook_target] &= ~MOD_HAT;  // ô and ơ cannot coexist
-            
-            // Propagate hook to preceding 'u' or 'o' immediately
+            char_mod[hook_target] &= ~MOD_HAT;
+
             for (int i = hook_target - 1; i >= 0; --i) {
                 const char32_t l = lower32(word_buffer[i]);
                 if (l == U'u' || l == U'o') {
@@ -283,9 +280,10 @@ bool ShadowEngine::handle_telex(char32_t keycode, char32_t lower_key, bool has_v
         }
 
         // Priority 2: apply MOD_BREVE to rightmost unmodified 'a'.
-        if (breve_target >= 0) {
+        // Only if buffer already has a vowel
+        if (breve_target >= 0 && has_vowel) {
             char_mod[breve_target] |= MOD_BREVE;
-            char_mod[breve_target] &= ~MOD_HAT;  // â and ă cannot coexist
+            char_mod[breve_target] &= ~MOD_HAT;
             last_mod_key    = U'w';
             last_mod_target = breve_target;
             return true;
@@ -297,11 +295,9 @@ bool ShadowEngine::handle_telex(char32_t keycode, char32_t lower_key, bool has_v
             const char32_t target_char = lower32(word_buffer[last_mod_target]);
             if (char_mod[last_mod_target] & MOD_STANDALONE_W) {
                 if (last_mod_target == 0) {
-                    // Revert standalone 'w' at start of word to literal 'w'
                     word_buffer[0] = (word_buffer[0] == U'U') ? U'W' : U'w';
                     char_mod[0] = 0u;
                 } else {
-                    // Revert standalone 'w' in middle of word to 'u' + 'w'
                     char_mod[last_mod_target] &= ~(MOD_HOOK | MOD_STANDALONE_W);
                     if (buffer_length < 32) word_buffer[buffer_length++] = keycode;
                 }
@@ -324,12 +320,20 @@ bool ShadowEngine::handle_telex(char32_t keycode, char32_t lower_key, bool has_v
         }
 
         // Priority 4: standalone 'w' → insert u with MOD_HOOK and MOD_STANDALONE_W (ư).
+        // Only create ư if we already have a vowel in buffer (actively composing Vietnamese).
+        // If buffer is empty or has no vowel, insert literal 'w' for English typing.
         if (buffer_length < 32) {
-            word_buffer[buffer_length] = (keycode == U'W') ? U'U' : U'u';
-            char_mod[buffer_length]    = MOD_HOOK | MOD_STANDALONE_W;
-            last_mod_key    = U'w';
-            last_mod_target = static_cast<int>(buffer_length);
-            buffer_length++;
+            if (has_vowel) {
+                word_buffer[buffer_length] = (keycode == U'W') ? U'U' : U'u';
+                char_mod[buffer_length]    = MOD_HOOK | MOD_STANDALONE_W;
+                last_mod_key    = U'w';
+                last_mod_target = static_cast<int>(buffer_length);
+                buffer_length++;
+            } else {
+                word_buffer[buffer_length] = keycode;
+                char_mod[buffer_length]    = 0u;
+                buffer_length++;
+            }
         }
         return true;
     }

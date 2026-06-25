@@ -83,9 +83,8 @@ int ShadowEngine::find_tone_target() const {
         const char32_t v0 = lower32(word_buffer[vidx[0]]);
         const char32_t v1 = lower32(word_buffer[vidx[1]]);
         if ((v0 == U'o' && (v1 == U'a' || v1 == U'e')) ||
-            (v0 == U'u' && (v1 == U'a' || v1 == U'o')) ||
-            (v0 == U'i' && v1 == U'a')) {
-            return vidx[1];   // oa / oe / ua / uo / ia → 2nd vowel always
+            (v0 == U'u' && (v1 == U'y' || v1 == U'o'))) {
+            return vidx[1];   // oa / oe / uy / uo → 2nd vowel always
         }
         if (static_cast<size_t>(vidx[1]) < buffer_length - 1) {
             return vidx[1];   // closed syllable → 2nd vowel

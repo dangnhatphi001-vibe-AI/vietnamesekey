@@ -280,13 +280,13 @@ CMakeFiles/vietnamesekey.dir/src/vietnamesekey_fcitx.cpp.o: \
  /usr/include/Fcitx5/Utils/fcitx-utils/textformatflags.h \
  /usr/include/Fcitx5/Core/fcitx/inputmethodengine.h \
  /usr/include/Fcitx5/Core/fcitx/inputmethodentry.h \
- /usr/include/Fcitx5/Core/fcitx/inputpanel.h \
- /usr/include/Fcitx5/Utils/fcitx-utils/element.h \
+ /usr/include/Fcitx5/Core/fcitx/instance.h \
  /usr/include/Fcitx5/Utils/fcitx-utils/connectableobject.h \
  /usr/include/Fcitx5/Utils/fcitx-utils/signals.h \
  /usr/include/Fcitx5/Utils/fcitx-utils/signals_details.h \
- /usr/include/Fcitx5/Core/fcitx/candidatelist.h \
- /usr/include/Fcitx5/Core/fcitx/instance.h \
  /usr/include/Fcitx5/Core/fcitx/globalconfig.h \
  /usr/include/Fcitx5/Core/fcitx/inputcontextmanager.h \
+ /usr/include/Fcitx5/Core/fcitx/inputpanel.h \
+ /usr/include/Fcitx5/Utils/fcitx-utils/element.h \
+ /usr/include/Fcitx5/Core/fcitx/candidatelist.h \
  /media/dang-nhat-phi/android/vietnamesekey/include/shadow_engine.h

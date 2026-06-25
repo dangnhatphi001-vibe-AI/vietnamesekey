@@ -1,25 +1,18 @@
-// vietnamesekey_fcitx.cpp
-// Fcitx5 plugin wrapper for the ShadowEngine Vietnamese composition engine.
-
 #include <fcitx/addonfactory.h>
 #include <fcitx/addoninstance.h>
 #include <fcitx/addonmanager.h>
 #include <fcitx/event.h>
 #include <fcitx/inputcontext.h>
 #include <fcitx/inputmethodengine.h>
-#include <fcitx/inputpanel.h>
 #include <fcitx/instance.h>
-#include <fcitx/text.h>
 #include <fcitx-utils/key.h>
 #include <fcitx-utils/keysym.h>
 #include <string>
+#include <fcitx/inputpanel.h>
+#include <fcitx/text.h>
 
 #include "shadow_engine.h"
 
-// ============================================================
-//  UTF-32 → UTF-8 encoder
-//  Hand-crafted bit-shifting on a stack array; zero allocation.
-// ============================================================
 static inline size_t encode_utf8(const char32_t* __restrict__ src,
                                   size_t                        src_len,
                                   char* __restrict__     dst,
@@ -50,9 +43,6 @@ static inline size_t encode_utf8(const char32_t* __restrict__ src,
     return n;
 }
 
-// ============================================================
-//  VietnameseKeyEngine
-// ============================================================
 class VietnameseKeyEngine final : public fcitx::InputMethodEngineV2 {
 public:
     explicit VietnameseKeyEngine(fcitx::Instance* instance)
@@ -72,70 +62,69 @@ public:
         const FcitxKeySym      sym    = ke.key().sym();
         const fcitx::KeyStates states = ke.key().states();
 
-        const bool has_ctrl_alt_super =
-            (states & fcitx::KeyState::Ctrl)  ||
-            (states & fcitx::KeyState::Alt)   ||
-            (states & fcitx::KeyState::Super);
-
-        if (has_ctrl_alt_super) {
-            commit_pending(ic);
+        // Pass through modifier combos untouched
+        if ((states & fcitx::KeyState::Ctrl) ||
+            (states & fcitx::KeyState::Alt)  ||
+            (states & fcitx::KeyState::Super)) {
+            flush(ic);
             return;
         }
 
+        // Escape: discard composition
         if (sym == FcitxKey_Escape) {
             if (engine_.has_composition()) {
-                engine_.reset();
-                clear_preedit(ic);
+                wipe(ic);
                 ke.filterAndAccept();
             }
             return;
         }
 
+        // Enter: commit as-is
         if (sym == FcitxKey_Return || sym == FcitxKey_KP_Enter) {
-            commit_pending(ic);
+            flush(ic);
             return;
         }
 
+        // Backspace inside composition
         if (sym == FcitxKey_BackSpace) {
             if (engine_.has_composition()) {
                 char32_t obuf[32];
                 size_t   olen = 0;
                 engine_.process_key(8, mode, obuf, olen);
-                if (engine_.has_composition()) {
-                    update_preedit(ic, obuf, olen);
-                } else {
-                    clear_preedit(ic);
-                }
+                show(ic, obuf, olen);
                 ke.filterAndAccept();
-                return;
             }
             return;
         }
 
+        // Non-printable ASCII: flush and pass through
         if (sym < 32 || sym > 126) {
-            commit_pending(ic);
+            flush(ic);
             return;
         }
 
+        // Word break: flush and let the key pass through to app
         if (ShadowEngine::is_word_break(static_cast<char32_t>(sym), mode)) {
-            commit_pending(ic);
+            flush(ic);
             return;
         }
 
+        // ── Main composition path ──
         char32_t obuf[32];
         size_t   olen = 0;
-        const bool handled =
+        const bool consumed =
             engine_.process_key(static_cast<char32_t>(sym), mode, obuf, olen);
 
-        if (handled) {
-            update_preedit(ic, obuf, olen);
+        if (consumed) {
+            show(ic, obuf, olen);
             ke.filterAndAccept();
         } else {
+            // Engine says "not part of Vietnamese" — commit whatever we had
             if (olen > 0) {
-                commit_utf32(ic, obuf, olen);
-                clear_preedit(ic);
+                // Engine returned final output
+                commit_buf(ic, obuf, olen);
             } else {
-                commit_pending(ic);
+                flush(ic);
             }
         }
     }
@@ -144,22 +133,12 @@ public:
 
     void reset(const fcitx::InputMethodEntry&,
                fcitx::InputContextEvent& ev) override {
-        fcitx::InputContext* ic = ev.inputContext();
-        engine_.reset();
-        if (ic) clear_preedit(ic);
+        flush(ev.inputContext());
     }
 
     void deactivate(const fcitx::InputMethodEntry& entry,
                     fcitx::InputContextEvent&       ev) override {
-        fcitx::InputContext* ic = ev.inputContext();
-        if (ic && engine_.has_composition()) {
-            char32_t obuf[32];
-            size_t   olen = 0;
-            engine_.get_composition(obuf, olen);
-            commit_utf32(ic, obuf, olen);
-            engine_.reset();
-            clear_preedit(ic);
-        }
+        flush(ev.inputContext());
         InputMethodEngineV2::deactivate(entry, ev);
     }
 
@@ -170,55 +149,128 @@ public:
 private:
     fcitx::Instance* instance_;
     ShadowEngine     engine_;
+    size_t           m_surr = 0;   // chars committed via SurroundingText (for delete)
+    char             m_utf8[256];  // cached UTF-8 buffer (avoid repeated encoding)
+    size_t           m_utf8n = 0;  // cached length
 
-    void commit_pending(fcitx::InputContext* ic) {
-        if (!engine_.has_composition()) return;
-        char32_t obuf[32];
-        size_t   olen = 0;
-        engine_.get_composition(obuf, olen);
-        commit_utf32(ic, obuf, olen);
+    // ── Capability checks (inlined, zero-cost) ──
+
+    static bool cap_surrounding(fcitx::InputContext* ic) {
+        return ic->capabilityFlags().test(fcitx::CapabilityFlag::SurroundingText);
+    }
+
+    static bool cap_preedit(fcitx::InputContext* ic) {
+        return ic->capabilityFlags().test(fcitx::CapabilityFlag::Preedit);
+    }
+
+    // ── Encode once, use twice ──
+
+    void encode(const char32_t* buf, size_t len) {
+        m_utf8n = (len > 0)
+            ? encode_utf8(buf, len, m_utf8, sizeof(m_utf8) - 1)
+            : 0;
+        m_utf8[m_utf8n] = '\0';
+    }
+
+    // ── Core display: dual-channel preedit ──
+    //
+    // SurroundingText-capable apps  → deleteSurroundingText + commitString (instant)
+    // Other apps                    → setClientPreedit (inline) + setPreedit (floating box)
+    //
+    // Both channels are updated in a single call to minimise round-trips.
+
+    void show(fcitx::InputContext* ic, const char32_t* obuf, size_t olen) {
+        encode(obuf, olen);
+
+        if (cap_surrounding(ic)) {
+            // ── Fast path: direct text manipulation ──
+            if (m_surr > 0) {
+                ic->deleteSurroundingText(-static_cast<int>(m_surr), m_surr);
+            }
+            if (m_utf8n > 0) {
+                ic->commitString(std::string(m_utf8, m_utf8n));
+            }
+            m_surr = olen;
+
+            // Keep panels clean
+            ic->inputPanel().setPreedit(fcitx::Text());
+            ic->inputPanel().setClientPreedit(fcitx::Text());
+            ic->updatePreedit();
+        } else {
+            // ── Preedit path: dual-channel for speed + floating box ──
+            m_surr = 0;
+            std::string s(m_utf8, m_utf8n);
+
+            // 1) Client preedit → inline in the text field (zero-delay)
+            fcitx::Text client;
+            if (m_utf8n > 0) {
+                client.append(s);
+                client.setCursor(static_cast<int>(m_utf8n));
+            }
+            ic->inputPanel().setClientPreedit(client);
+
+            // 2) Panel preedit → floating box (plain text, no highlight/underline)
+            fcitx::Text panel;
+            if (m_utf8n > 0) {
+                panel.append(s);
+            }
+            ic->inputPanel().setPreedit(panel);
+
+            // Single updatePreedit pushes both channels at once
+            ic->updatePreedit();
+
+            // Show the floating panel
+            ic->updateUserInterface(fcitx::UserInterfaceComponent::InputPanel);
+        }
+    }
+
+    // ── Commit final text and clear everything ──
+
+    void commit_buf(fcitx::InputContext* ic, const char32_t* obuf, size_t olen) {
+        encode(obuf, olen);
+        if (m_utf8n > 0) {
+            if (!cap_surrounding(ic)) {
+                // Must commit the preedit text to the application
+                ic->commitString(std::string(m_utf8, m_utf8n));
+            }
+            // For SurroundingText apps the text is already committed in show()
+        }
+        wipe(ic);
+    }
+
+    // ── Flush: commit current composition and reset ──
+
+    void flush(fcitx::InputContext* ic) {
+        if (engine_.has_composition()) {
+            if (!cap_surrounding(ic)) {
+                // Preedit mode: need to commit the text
+                char32_t obuf[32];
+                size_t olen = 0;
+                engine_.get_composition(obuf, olen);
+                if (olen > 0) {
+                    encode(obuf, olen);
+                    ic->commitString(std::string(m_utf8, m_utf8n));
+                }
+            }
+            // SurroundingText mode: text already committed char by char
+            wipe(ic);
+        }
+    }
+
+    // ── Wipe all state and clear UI ──
+
+    void wipe(fcitx::InputContext* ic) {
         engine_.reset();
-        clear_preedit(ic);
-    }
+        m_surr = 0;
+        m_utf8n = 0;
 
-    void commit_utf32(fcitx::InputContext* ic,
-                      const char32_t* obuf, size_t olen) {
-        if (olen == 0) return;
-        char utf8[256];
-        const size_t nb = encode_utf8(obuf, olen, utf8, sizeof(utf8) - 1);
-        utf8[nb] = '\0';
-        ic->commitString(std::string(utf8, nb));
-    }
-
-    // ============================================================
-    // FIXED PREEDIT LOGIC: Underline flag + UI Update explicitly
-    // ============================================================
-    void update_preedit(fcitx::InputContext* ic,
-                        const char32_t* obuf, size_t olen) {
-        char utf8[256];
-        const size_t nb = encode_utf8(obuf, olen, utf8, sizeof(utf8) - 1);
-        utf8[nb] = '\0';
-
-        fcitx::Text txt;
-        // Bắt buộc phải có format Underline để GTK/Qt/Chrome hiển thị chữ đang gõ
-        txt.append(std::string(utf8, nb), fcitx::TextFormatFlag::Underline);
-
-        ic->inputPanel().setPreedit(txt);
-        ic->updatePreedit();
-        // Ép Fcitx5 vẽ lại bảng InputPanel
-        ic->updateUserInterface(fcitx::UserInterfaceComponent::InputPanel);
-    }
-
-    void clear_preedit(fcitx::InputContext* ic) {
         ic->inputPanel().setPreedit(fcitx::Text());
+        ic->inputPanel().setClientPreedit(fcitx::Text());
         ic->updatePreedit();
         ic->updateUserInterface(fcitx::UserInterfaceComponent::InputPanel);
     }
 };
 
-// ============================================================
-//  Addon factory
-// ============================================================
 class VietnameseKeyFactory final : public fcitx::AddonFactory {
 public:
     fcitx::AddonInstance* create(fcitx::AddonManager* manager) override {

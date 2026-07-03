@@ -1,9 +1,0 @@
-/media/dang-nhat-phi/android/vietnamesekey/build/CMakeFiles/generate-desktop-file.dir
-/media/dang-nhat-phi/android/vietnamesekey/build/CMakeFiles/translation-file.dir
-/media/dang-nhat-phi/android/vietnamesekey/build/CMakeFiles/vietnamesekey.dir
-/media/dang-nhat-phi/android/vietnamesekey/build/CMakeFiles/edit_cache.dir
-/media/dang-nhat-phi/android/vietnamesekey/build/CMakeFiles/rebuild_cache.dir
-/media/dang-nhat-phi/android/vietnamesekey/build/CMakeFiles/list_install_components.dir
-/media/dang-nhat-phi/android/vietnamesekey/build/CMakeFiles/install.dir
-/media/dang-nhat-phi/android/vietnamesekey/build/CMakeFiles/install/local.dir
-/media/dang-nhat-phi/android/vietnamesekey/build/CMakeFiles/install/strip.dir

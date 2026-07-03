@@ -18,10 +18,8 @@ ShadowEngine::ShadowEngine() { reset_state(); }
 void ShadowEngine::reset()   { reset_state(); }
 
 void ShadowEngine::reset_state() {
-    for (size_t i = 0; i < 32; ++i) {
-        word_buffer[i] = U'\0';
-        char_mod[i]    = 0u;
-    }
+    __builtin_memset(word_buffer, 0, sizeof(word_buffer));
+    __builtin_memset(char_mod, 0, sizeof(char_mod));
     buffer_length   = 0;
     current_tone    = TONE_NONE;
     last_tone_key   = U'\0';
@@ -34,8 +32,10 @@ void ShadowEngine::reset_state() {
 // ──────────────────────────────────────────────────────────────────────────────
 bool ShadowEngine::is_vowel(char32_t c) const {
     const char32_t l = lower32(c);
-    return l == U'a' || l == U'e' || l == U'o'
-        || l == U'u' || l == U'i' || l == U'y';
+    if (l < U'a' || l > U'z') return false;
+    // a=0, e=4, i=8, o=14, u=20, y=24
+    // 1<<0 | 1<<4 | 1<<8 | 1<<14 | 1<<20 | 1<<24 = 0x1104111
+    return (0x1104111 >> (l - U'a')) & 1;
 }
 
 bool ShadowEngine::is_word_break(char32_t keycode, uint8_t mode) {
@@ -263,18 +263,27 @@ bool ShadowEngine::handle_telex(char32_t keycode, char32_t lower_key, bool has_v
         // Priority 1: apply MOD_HOOK to rightmost unmodified u or o.
         // Only if buffer already has a vowel (not starting English words with w)
         if (hook_target >= 0 && has_vowel) {
-            char_mod[hook_target] |= MOD_HOOK;
-            char_mod[hook_target] &= ~MOD_HAT;
+            const char32_t target_l = lower32(word_buffer[hook_target]);
+            int left_idx = hook_target - 1;
+            char32_t left_l = (left_idx >= 0) ? lower32(word_buffer[left_idx]) : U'\0';
 
-            for (int i = hook_target - 1; i >= 0; --i) {
-                const char32_t l = lower32(word_buffer[i]);
-                if (l == U'u' || l == U'o') {
-                    char_mod[i] |= MOD_HOOK;
-                    char_mod[i] &= ~MOD_HAT;
-                } else break;
+            if ((target_l == U'o' && left_l == U'u') || 
+                (target_l == U'u' && left_l == U'o')) {
+                char_mod[hook_target] |= MOD_HOOK;
+                char_mod[hook_target] &= ~MOD_HAT;
+                char_mod[left_idx] |= MOD_HOOK;
+                char_mod[left_idx] &= ~MOD_HAT;
+                last_mod_target = hook_target;
+            } else if (target_l == U'u' && left_l == U'u') {
+                char_mod[left_idx] |= MOD_HOOK;
+                char_mod[left_idx] &= ~MOD_HAT;
+                last_mod_target = left_idx;
+            } else {
+                char_mod[hook_target] |= MOD_HOOK;
+                char_mod[hook_target] &= ~MOD_HAT;
+                last_mod_target = hook_target;
             }
-            last_mod_key    = U'w';
-            last_mod_target = hook_target;
+            last_mod_key = U'w';
             return true;
         }
 
@@ -392,14 +401,9 @@ bool ShadowEngine::handle_vni(char32_t keycode, bool has_vowel) {
 
     // ── 7 → hook/horn (u/o → ư/ơ): rightmost u/o + cluster extension ────────
     if (keycode == U'7') {
-        int hook_target = -1;
-        for (int i = static_cast<int>(buffer_length) - 1; i >= 0; --i) {
-            const char32_t l = lower32(word_buffer[i]);
-            if (l == U'u' || l == U'o') { hook_target = i; break; }
-        }
-        if (hook_target >= 0) {
-            if ((char_mod[hook_target] & MOD_HOOK) &&
-                last_mod_key == U'7' && last_mod_target == hook_target) {
+        if (last_mod_key == U'7' && last_mod_target >= 0) {
+            const char32_t target_char = lower32(word_buffer[last_mod_target]);
+            if (target_char == U'u' || target_char == U'o') {
                 for (size_t i = 0; i < buffer_length; ++i) {
                     const char32_t l = lower32(word_buffer[i]);
                     if (l == U'u' || l == U'o') char_mod[i] &= ~MOD_HOOK;
@@ -407,19 +411,43 @@ bool ShadowEngine::handle_vni(char32_t keycode, bool has_vowel) {
                 last_mod_key    = U'\0';
                 last_mod_target = -1;
                 if (buffer_length < 32) word_buffer[buffer_length++] = keycode;
+                return true;
+            }
+        }
+
+        int hook_target = -1;
+        for (int i = static_cast<int>(buffer_length) - 1; i >= 0; --i) {
+            const char32_t l = lower32(word_buffer[i]);
+            if (l == U'u' || l == U'o') { 
+                if (l == U'u' && i >= 2 && lower32(word_buffer[i - 1]) == U'o' && lower32(word_buffer[i - 2]) == U'u') {
+                    continue;
+                }
+                hook_target = i; 
+                break; 
+            }
+        }
+        if (hook_target >= 0) {
+            const char32_t target_l = lower32(word_buffer[hook_target]);
+            int left_idx = hook_target - 1;
+            char32_t left_l = (left_idx >= 0) ? lower32(word_buffer[left_idx]) : U'\0';
+
+            if ((target_l == U'o' && left_l == U'u') || 
+                (target_l == U'u' && left_l == U'o')) {
+                char_mod[hook_target] |= MOD_HOOK;
+                char_mod[hook_target] &= ~MOD_HAT;
+                char_mod[left_idx] |= MOD_HOOK;
+                char_mod[left_idx] &= ~MOD_HAT;
+                last_mod_target = hook_target;
+            } else if (target_l == U'u' && left_l == U'u') {
+                char_mod[left_idx] |= MOD_HOOK;
+                char_mod[left_idx] &= ~MOD_HAT;
+                last_mod_target = left_idx;
             } else {
                 char_mod[hook_target] |= MOD_HOOK;
                 char_mod[hook_target] &= ~MOD_HAT;
-                for (int i = hook_target - 1; i >= 0; --i) {
-                    const char32_t l = lower32(word_buffer[i]);
-                    if (l == U'u' || l == U'o') {
-                        char_mod[i] |= MOD_HOOK;
-                        char_mod[i] &= ~MOD_HAT;
-                    } else break;
-                }
-                last_mod_key    = U'7';
                 last_mod_target = hook_target;
             }
+            last_mod_key = U'7';
             return true;
         }
         return false;
@@ -484,7 +512,7 @@ bool ShadowEngine::process_key(char32_t keycode, uint8_t mode,
                                 char32_t* output_str, size_t& out_len) {
 
     // ── 1. Smart Backspace ───────────────────────────────────────────────────
-    if (keycode == 8 || keycode == 127) {
+    if (__builtin_expect(keycode == 8 || keycode == 127, 0)) {
         if (buffer_length == 0 && current_tone == TONE_NONE) {
             out_len = 0;
             return false;   // pass BackSpace through
@@ -509,7 +537,7 @@ bool ShadowEngine::process_key(char32_t keycode, uint8_t mode,
     }
 
     // ── 2. Non-printable control keys → reset, do not consume ───────────────
-    if (keycode < 32) {
+    if (__builtin_expect(keycode < 32, 0)) {
         reset_state();
         out_len = 0;
         return false;
@@ -536,7 +564,7 @@ bool ShadowEngine::process_key(char32_t keycode, uint8_t mode,
     }
 
     // ── 6. Buffer capacity guard ─────────────────────────────────────────────
-    if (!consumed && buffer_length >= 32) {
+    if (__builtin_expect(!consumed && buffer_length >= 32, 0)) {
         reconstruct_word(output_str, out_len);
         reset_state();
         return false;

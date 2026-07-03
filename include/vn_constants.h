@@ -22,285 +22,162 @@ constexpr uint32_t MOD_D     = 1 << 8; // Đ (d slash)
 // Unknown combinations (invalid tone values, impossible modifier+base pairings) return base_char.
 // Issue 9 FIX: all inner switch(tone) blocks now have `default: break;` so an invalid
 // tone value returns base_char rather than falling through silently.
+constexpr char32_t VN_CHAR_TABLE[14][5][6] = {
+    // Base: a
+    {
+        { U'a', U'\x00E1', U'\x00E0', U'\x1EA3', U'\x00E3', U'\x1EA1' }, // MOD_NONE
+        { U'\x00E2', U'\x1EA5', U'\x1EA7', U'\x1EA9', U'\x1EAB', U'\x1EAD' }, // MOD_HAT
+        { U'a', U'a', U'a', U'a', U'a', U'a' }, // MOD_HOOK
+        { U'\x0103', U'\x1EAF', U'\x1EB1', U'\x1EB3', U'\x1EB5', U'\x1EB7' }, // MOD_BREVE
+        { U'a', U'a', U'a', U'a', U'a', U'a' }, // MOD_D
+    },
+    // Base: e
+    {
+        { U'e', U'\x00E9', U'\x00E8', U'\x1EBB', U'\x1EBD', U'\x1EB9' }, // MOD_NONE
+        { U'\x00EA', U'\x1EBF', U'\x1EC1', U'\x1EC3', U'\x1EC5', U'\x1EC7' }, // MOD_HAT
+        { U'e', U'e', U'e', U'e', U'e', U'e' }, // MOD_HOOK
+        { U'e', U'e', U'e', U'e', U'e', U'e' }, // MOD_BREVE
+        { U'e', U'e', U'e', U'e', U'e', U'e' }, // MOD_D
+    },
+    // Base: i
+    {
+        { U'i', U'\x00ED', U'\x00EC', U'\x1EC9', U'\x0129', U'\x1ECB' }, // MOD_NONE
+        { U'i', U'i', U'i', U'i', U'i', U'i' }, // MOD_HAT
+        { U'i', U'i', U'i', U'i', U'i', U'i' }, // MOD_HOOK
+        { U'i', U'i', U'i', U'i', U'i', U'i' }, // MOD_BREVE
+        { U'i', U'i', U'i', U'i', U'i', U'i' }, // MOD_D
+    },
+    // Base: o
+    {
+        { U'o', U'\x00F3', U'\x00F2', U'\x1ECF', U'\x00F5', U'\x1ECD' }, // MOD_NONE
+        { U'\x00F4', U'\x1ED1', U'\x1ED3', U'\x1ED5', U'\x1ED7', U'\x1ED9' }, // MOD_HAT
+        { U'\x01A1', U'\x1EDB', U'\x1EDD', U'\x1EDF', U'\x1EE1', U'\x1EE3' }, // MOD_HOOK
+        { U'o', U'o', U'o', U'o', U'o', U'o' }, // MOD_BREVE
+        { U'o', U'o', U'o', U'o', U'o', U'o' }, // MOD_D
+    },
+    // Base: u
+    {
+        { U'u', U'\x00FA', U'\x00F9', U'\x1EE7', U'\x0169', U'\x1EE5' }, // MOD_NONE
+        { U'u', U'u', U'u', U'u', U'u', U'u' }, // MOD_HAT
+        { U'\x01B0', U'\x1EE9', U'\x1EEB', U'\x1EED', U'\x1EEF', U'\x1EF1' }, // MOD_HOOK
+        { U'u', U'u', U'u', U'u', U'u', U'u' }, // MOD_BREVE
+        { U'u', U'u', U'u', U'u', U'u', U'u' }, // MOD_D
+    },
+    // Base: y
+    {
+        { U'y', U'\x00FD', U'\x1EF3', U'\x1EF7', U'\x1EF9', U'\x1EF5' }, // MOD_NONE
+        { U'y', U'y', U'y', U'y', U'y', U'y' }, // MOD_HAT
+        { U'y', U'y', U'y', U'y', U'y', U'y' }, // MOD_HOOK
+        { U'y', U'y', U'y', U'y', U'y', U'y' }, // MOD_BREVE
+        { U'y', U'y', U'y', U'y', U'y', U'y' }, // MOD_D
+    },
+    // Base: d
+    {
+        { U'd', U'd', U'd', U'd', U'd', U'd' }, // MOD_NONE
+        { U'd', U'd', U'd', U'd', U'd', U'd' }, // MOD_HAT
+        { U'd', U'd', U'd', U'd', U'd', U'd' }, // MOD_HOOK
+        { U'd', U'd', U'd', U'd', U'd', U'd' }, // MOD_BREVE
+        { U'\x0111', U'\x0111', U'\x0111', U'\x0111', U'\x0111', U'\x0111' }, // MOD_D
+    },
+    // Base: A
+    {
+        { U'A', U'\x00C1', U'\x00C0', U'\x1EA2', U'\x00C3', U'\x1EA0' }, // MOD_NONE
+        { U'\x00C2', U'\x1EA4', U'\x1EA6', U'\x1EA8', U'\x1EAA', U'\x1EAC' }, // MOD_HAT
+        { U'A', U'A', U'A', U'A', U'A', U'A' }, // MOD_HOOK
+        { U'\x0102', U'\x1EAE', U'\x1EB0', U'\x1EB2', U'\x1EB4', U'\x1EB6' }, // MOD_BREVE
+        { U'A', U'A', U'A', U'A', U'A', U'A' }, // MOD_D
+    },
+    // Base: E
+    {
+        { U'E', U'\x00C9', U'\x00C8', U'\x1EBA', U'\x1EBC', U'\x1EB8' }, // MOD_NONE
+        { U'\x00CA', U'\x1EBE', U'\x1EC0', U'\x1EC2', U'\x1EC4', U'\x1EC6' }, // MOD_HAT
+        { U'E', U'E', U'E', U'E', U'E', U'E' }, // MOD_HOOK
+        { U'E', U'E', U'E', U'E', U'E', U'E' }, // MOD_BREVE
+        { U'E', U'E', U'E', U'E', U'E', U'E' }, // MOD_D
+    },
+    // Base: I
+    {
+        { U'I', U'\x00CD', U'\x00CC', U'\x1EC8', U'\x0128', U'\x1ECA' }, // MOD_NONE
+        { U'I', U'I', U'I', U'I', U'I', U'I' }, // MOD_HAT
+        { U'I', U'I', U'I', U'I', U'I', U'I' }, // MOD_HOOK
+        { U'I', U'I', U'I', U'I', U'I', U'I' }, // MOD_BREVE
+        { U'I', U'I', U'I', U'I', U'I', U'I' }, // MOD_D
+    },
+    // Base: O
+    {
+        { U'O', U'\x00D3', U'\x00D2', U'\x1ECE', U'\x00D5', U'\x1ECC' }, // MOD_NONE
+        { U'\x00D4', U'\x1ED0', U'\x1ED2', U'\x1ED4', U'\x1ED6', U'\x1ED8' }, // MOD_HAT
+        { U'\x01A0', U'\x1EDA', U'\x1EDC', U'\x1EDE', U'\x1EE0', U'\x1EE2' }, // MOD_HOOK
+        { U'O', U'O', U'O', U'O', U'O', U'O' }, // MOD_BREVE
+        { U'O', U'O', U'O', U'O', U'O', U'O' }, // MOD_D
+    },
+    // Base: U
+    {
+        { U'U', U'\x00DA', U'\x00D9', U'\x1EE6', U'\x0168', U'\x1EE4' }, // MOD_NONE
+        { U'U', U'U', U'U', U'U', U'U', U'U' }, // MOD_HAT
+        { U'\x01AF', U'\x1EE8', U'\x1EEA', U'\x1EEC', U'\x1EEE', U'\x1EF0' }, // MOD_HOOK
+        { U'U', U'U', U'U', U'U', U'U', U'U' }, // MOD_BREVE
+        { U'U', U'U', U'U', U'U', U'U', U'U' }, // MOD_D
+    },
+    // Base: Y
+    {
+        { U'Y', U'\x00DD', U'\x1EF2', U'\x1EF6', U'\x1EF8', U'\x1EF4' }, // MOD_NONE
+        { U'Y', U'Y', U'Y', U'Y', U'Y', U'Y' }, // MOD_HAT
+        { U'Y', U'Y', U'Y', U'Y', U'Y', U'Y' }, // MOD_HOOK
+        { U'Y', U'Y', U'Y', U'Y', U'Y', U'Y' }, // MOD_BREVE
+        { U'Y', U'Y', U'Y', U'Y', U'Y', U'Y' }, // MOD_D
+    },
+    // Base: D
+    {
+        { U'D', U'D', U'D', U'D', U'D', U'D' }, // MOD_NONE
+        { U'D', U'D', U'D', U'D', U'D', U'D' }, // MOD_HAT
+        { U'D', U'D', U'D', U'D', U'D', U'D' }, // MOD_HOOK
+        { U'D', U'D', U'D', U'D', U'D', U'D' }, // MOD_BREVE
+        { U'\x0110', U'\x0110', U'\x0110', U'\x0110', U'\x0110', U'\x0110' }, // MOD_D
+    },
+};
+
 constexpr char32_t lookup_vietnamese_char(char32_t base_char, uint32_t tone, uint32_t mod) {
+    int base_idx = -1;
     switch (base_char) {
-        case U'a':
-            if (mod & MOD_HAT) {
-                switch (tone) {
-                    case TONE_NONE:  return U'â'; // 0x00E2
-                    case TONE_SAC:   return U'ấ'; // 0x1EA5
-                    case TONE_HUYEN: return U'ầ'; // 0x1EA7
-                    case TONE_HOI:   return U'ẩ'; // 0x1EA9
-                    case TONE_NGA:   return U'ẫ'; // 0x1EAB
-                    case TONE_NANG:  return U'ậ'; // 0x1EAD
-                    default: break;
-                }
-            } else if (mod & MOD_BREVE) {
-                switch (tone) {
-                    case TONE_NONE:  return U'ă'; // 0x0103
-                    case TONE_SAC:   return U'ắ'; // 0x1EAF
-                    case TONE_HUYEN: return U'ằ'; // 0x1EB1
-                    case TONE_HOI:   return U'ẳ'; // 0x1EB3
-                    case TONE_NGA:   return U'ẵ'; // 0x1EB5
-                    case TONE_NANG:  return U'ặ'; // 0x1EB7
-                    default: break;
-                }
-            } else {
-                switch (tone) {
-                    case TONE_NONE:  return U'a'; // 0x0061
-                    case TONE_SAC:   return U'á'; // 0x00E1
-                    case TONE_HUYEN: return U'à'; // 0x00E0
-                    case TONE_HOI:   return U'ả'; // 0x1EA3
-                    case TONE_NGA:   return U'ã'; // 0x00E3
-                    case TONE_NANG:  return U'ạ'; // 0x1EA1
-                    default: break;
-                }
-            }
-            break;
-        case U'A':
-            if (mod & MOD_HAT) {
-                switch (tone) {
-                    case TONE_NONE:  return U'Â'; // 0x00C2
-                    case TONE_SAC:   return U'Ấ'; // 0x1EA4
-                    case TONE_HUYEN: return U'Ầ'; // 0x1EA6
-                    case TONE_HOI:   return U'Ẩ'; // 0x1EA8
-                    case TONE_NGA:   return U'Ẫ'; // 0x1EAA
-                    case TONE_NANG:  return U'Ậ'; // 0x1EAC
-                    default: break;
-                }
-            } else if (mod & MOD_BREVE) {
-                switch (tone) {
-                    case TONE_NONE:  return U'Ă'; // 0x0102
-                    case TONE_SAC:   return U'Ắ'; // 0x1EAE
-                    case TONE_HUYEN: return U'Ằ'; // 0x1EB0
-                    case TONE_HOI:   return U'Ẳ'; // 0x1EB2
-                    case TONE_NGA:   return U'Ẵ'; // 0x1EB4
-                    case TONE_NANG:  return U'Ặ'; // 0x1EB6
-                    default: break;
-                }
-            } else {
-                switch (tone) {
-                    case TONE_NONE:  return U'A'; // 0x0041
-                    case TONE_SAC:   return U'Á'; // 0x00C1
-                    case TONE_HUYEN: return U'À'; // 0x00C0
-                    case TONE_HOI:   return U'Ả'; // 0x1EA2
-                    case TONE_NGA:   return U'Ã'; // 0x00C3
-                    case TONE_NANG:  return U'Ạ'; // 0x1EA0
-                    default: break;
-                }
-            }
-            break;
-        case U'e':
-            if (mod & MOD_HAT) {
-                switch (tone) {
-                    case TONE_NONE:  return U'ê'; // 0x00EA
-                    case TONE_SAC:   return U'ế'; // 0x1EBF
-                    case TONE_HUYEN: return U'ề'; // 0x1EC1
-                    case TONE_HOI:   return U'ể'; // 0x1EC3
-                    case TONE_NGA:   return U'ễ'; // 0x1EC5
-                    case TONE_NANG:  return U'ệ'; // 0x1EC7
-                    default: break;
-                }
-            } else {
-                switch (tone) {
-                    case TONE_NONE:  return U'e'; // 0x0065
-                    case TONE_SAC:   return U'é'; // 0x00E9
-                    case TONE_HUYEN: return U'è'; // 0x00E8
-                    case TONE_HOI:   return U'ẻ'; // 0x1EBB
-                    case TONE_NGA:   return U'ẽ'; // 0x1EBD
-                    case TONE_NANG:  return U'ẹ'; // 0x1EB9
-                    default: break;
-                }
-            }
-            break;
-        case U'E':
-            if (mod & MOD_HAT) {
-                switch (tone) {
-                    case TONE_NONE:  return U'Ê'; // 0x00CA
-                    case TONE_SAC:   return U'Ế'; // 0x1EBE
-                    case TONE_HUYEN: return U'Ề'; // 0x1EC0
-                    case TONE_HOI:   return U'Ể'; // 0x1EC2
-                    case TONE_NGA:   return U'Ễ'; // 0x1EC4
-                    case TONE_NANG:  return U'Ệ'; // 0x1EC6
-                    default: break;
-                }
-            } else {
-                switch (tone) {
-                    case TONE_NONE:  return U'E'; // 0x0045
-                    case TONE_SAC:   return U'É'; // 0x00C9
-                    case TONE_HUYEN: return U'È'; // 0x00C8
-                    case TONE_HOI:   return U'Ẻ'; // 0x1EBA
-                    case TONE_NGA:   return U'Ẽ'; // 0x1EBC
-                    case TONE_NANG:  return U'Ẹ'; // 0x1EB8
-                    default: break;
-                }
-            }
-            break;
-        case U'o':
-            if (mod & MOD_HAT) {
-                switch (tone) {
-                    case TONE_NONE:  return U'ô'; // 0x00F4
-                    case TONE_SAC:   return U'ố'; // 0x1ED1
-                    case TONE_HUYEN: return U'ồ'; // 0x1ED3
-                    case TONE_HOI:   return U'ổ'; // 0x1ED5
-                    case TONE_NGA:   return U'ỗ'; // 0x1ED7
-                    case TONE_NANG:  return U'ộ'; // 0x1ED9
-                    default: break;
-                }
-            } else if (mod & MOD_HOOK) {
-                switch (tone) {
-                    case TONE_NONE:  return U'ơ'; // 0x01A1
-                    case TONE_SAC:   return U'ớ'; // 0x1EDB
-                    case TONE_HUYEN: return U'ờ'; // 0x1EDD
-                    case TONE_HOI:   return U'ở'; // 0x1EDF
-                    case TONE_NGA:   return U'ỡ'; // 0x1EE1
-                    case TONE_NANG:  return U'ợ'; // 0x1EE3
-                    default: break;
-                }
-            } else {
-                switch (tone) {
-                    case TONE_NONE:  return U'o'; // 0x006F
-                    case TONE_SAC:   return U'ó'; // 0x00F3
-                    case TONE_HUYEN: return U'ò'; // 0x00F2
-                    case TONE_HOI:   return U'ỏ'; // 0x1ECF
-                    case TONE_NGA:   return U'õ'; // 0x00F5
-                    case TONE_NANG:  return U'ọ'; // 0x1ECD
-                    default: break;
-                }
-            }
-            break;
-        case U'O':
-            if (mod & MOD_HAT) {
-                switch (tone) {
-                    case TONE_NONE:  return U'Ô'; // 0x00D4
-                    case TONE_SAC:   return U'Ố'; // 0x1ED0
-                    case TONE_HUYEN: return U'Ồ'; // 0x1ED2
-                    case TONE_HOI:   return U'Ổ'; // 0x1ED4
-                    case TONE_NGA:   return U'Ỗ'; // 0x1ED6
-                    case TONE_NANG:  return U'Ộ'; // 0x1ED8
-                    default: break;
-                }
-            } else if (mod & MOD_HOOK) {
-                switch (tone) {
-                    case TONE_NONE:  return U'Ơ'; // 0x01A0
-                    case TONE_SAC:   return U'Ớ'; // 0x1EDA
-                    case TONE_HUYEN: return U'Ờ'; // 0x1EDC
-                    case TONE_HOI:   return U'Ở'; // 0x1EDE
-                    case TONE_NGA:   return U'Ỡ'; // 0x1EE0
-                    case TONE_NANG:  return U'Ợ'; // 0x1EE2
-                    default: break;
-                }
-            } else {
-                switch (tone) {
-                    case TONE_NONE:  return U'O'; // 0x004F
-                    case TONE_SAC:   return U'Ó'; // 0x00D3
-                    case TONE_HUYEN: return U'Ò'; // 0x00D2
-                    case TONE_HOI:   return U'Ỏ'; // 0x1ECE
-                    case TONE_NGA:   return U'Õ'; // 0x00D5
-                    case TONE_NANG:  return U'Ọ'; // 0x1ECC
-                    default: break;
-                }
-            }
-            break;
-        case U'u':
-            if (mod & MOD_HOOK) {
-                switch (tone) {
-                    case TONE_NONE:  return U'ư'; // 0x01B0
-                    case TONE_SAC:   return U'ứ'; // 0x1EE9
-                    case TONE_HUYEN: return U'ừ'; // 0x1EEB
-                    case TONE_HOI:   return U'ử'; // 0x1EED
-                    case TONE_NGA:   return U'ữ'; // 0x1EEF
-                    case TONE_NANG:  return U'ự'; // 0x1EF1
-                    default: break;
-                }
-            } else {
-                switch (tone) {
-                    case TONE_NONE:  return U'u'; // 0x0075
-                    case TONE_SAC:   return U'ú'; // 0x00FA
-                    case TONE_HUYEN: return U'ù'; // 0x00F9
-                    case TONE_HOI:   return U'ủ'; // 0x1EE7
-                    case TONE_NGA:   return U'ũ'; // 0x0169
-                    case TONE_NANG:  return U'ụ'; // 0x1EE5
-                    default: break;
-                }
-            }
-            break;
-        case U'U':
-            if (mod & MOD_HOOK) {
-                switch (tone) {
-                    case TONE_NONE:  return U'Ư'; // 0x01AF
-                    case TONE_SAC:   return U'Ứ'; // 0x1EE8
-                    case TONE_HUYEN: return U'Ừ'; // 0x1EEA
-                    case TONE_HOI:   return U'Ử'; // 0x1EEC
-                    case TONE_NGA:   return U'Ữ'; // 0x1EEE
-                    case TONE_NANG:  return U'Ự'; // 0x1EF0
-                    default: break;
-                }
-            } else {
-                switch (tone) {
-                    case TONE_NONE:  return U'U'; // 0x0055
-                    case TONE_SAC:   return U'Ú'; // 0x00DA
-                    case TONE_HUYEN: return U'Ù'; // 0x00D9
-                    case TONE_HOI:   return U'Ủ'; // 0x1EE6
-                    case TONE_NGA:   return U'Ũ'; // 0x0168
-                    case TONE_NANG:  return U'Ụ'; // 0x1EE4
-                    default: break;
-                }
-            }
-            break;
-        case U'i':
-            switch (tone) {
-                case TONE_NONE:  return U'i'; // 0x0069
-                case TONE_SAC:   return U'í'; // 0x00ED
-                case TONE_HUYEN: return U'ì'; // 0x00EC
-                case TONE_HOI:   return U'ỉ'; // 0x1EC9
-                case TONE_NGA:   return U'ĩ'; // 0x0129
-                case TONE_NANG:  return U'ị'; // 0x1ECB
-                default: break;
-            }
-            break;
-        case U'I':
-            switch (tone) {
-                case TONE_NONE:  return U'I'; // 0x0049
-                case TONE_SAC:   return U'Í'; // 0x00CD
-                case TONE_HUYEN: return U'Ì'; // 0x00CC
-                case TONE_HOI:   return U'Ỉ'; // 0x1EC8
-                case TONE_NGA:   return U'Ĩ'; // 0x0128
-                case TONE_NANG:  return U'Ị'; // 0x1ECA
-                default: break;
-            }
-            break;
-        case U'y':
-            switch (tone) {
-                case TONE_NONE:  return U'y'; // 0x0079
-                case TONE_SAC:   return U'ý'; // 0x00FD
-                case TONE_HUYEN: return U'ỳ'; // 0x1EF3
-                case TONE_HOI:   return U'ỷ'; // 0x1EF7
-                case TONE_NGA:   return U'ỹ'; // 0x1EF9
-                case TONE_NANG:  return U'ỵ'; // 0x1EF5
-                default: break;
-            }
-            break;
-        case U'Y':
-            switch (tone) {
-                case TONE_NONE:  return U'Y'; // 0x0059
-                case TONE_SAC:   return U'Ý'; // 0x00DD
-                case TONE_HUYEN: return U'Ỳ'; // 0x1EF2
-                case TONE_HOI:   return U'Ỷ'; // 0x1EF6
-                case TONE_NGA:   return U'Ỹ'; // 0x1EF8
-                case TONE_NANG:  return U'Ỵ'; // 0x1EF4
-                default: break;
-            }
-            break;
-        case U'd':
-            if (mod & MOD_D) return U'đ'; // 0x0111
-            return U'd';
-        case U'D':
-            if (mod & MOD_D) return U'Đ'; // 0x0110
-            return U'D';
-        default: break;
+        case U'a': base_idx = 0; break;
+        case U'e': base_idx = 1; break;
+        case U'i': base_idx = 2; break;
+        case U'o': base_idx = 3; break;
+        case U'u': base_idx = 4; break;
+        case U'y': base_idx = 5; break;
+        case U'd': base_idx = 6; break;
+        case U'A': base_idx = 7; break;
+        case U'E': base_idx = 8; break;
+        case U'I': base_idx = 9; break;
+        case U'O': base_idx = 10; break;
+        case U'U': base_idx = 11; break;
+        case U'Y': base_idx = 12; break;
+        case U'D': base_idx = 13; break;
+        default: return base_char;
     }
-    return base_char;
+
+    int tone_idx = 0;
+    if (tone) {
+        tone_idx = __builtin_ctz(tone) + 1; // TONE_SAC=1(bit 0), so ctz=0 -> idx=1
+        if (tone_idx > 5) tone_idx = 0; // fallback
+    }
+
+    int mod_idx = 0;
+    if (mod) {
+        mod_idx = __builtin_ctz(mod) - 4; // MOD_HAT=1<<5 -> ctz=5 -> idx=1
+        if (mod_idx < 0 || mod_idx > 4) mod_idx = 0; // fallback
+    }
+
+    char32_t result = VN_CHAR_TABLE[base_idx][mod_idx][tone_idx];
+    if (result == U'a' || result == U'A') {
+        // Just checking if we got the fallback dummy for invalid combos, actually the generator put base_char for invalid combos
+        // so it's already correct.
+    }
+    
+    // In our table, invalid combos just hold the base_char, so returning it is safe.
+    return result;
 }
+
 
 #endif // VN_CONSTANTS_H

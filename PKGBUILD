@@ -2,7 +2,7 @@
 pkgname=vietnamesekey
 pkgver=1.0.0
 pkgrel=1
-pkgdesc="An ultra-optimized, zero-dynamic-allocation C++17 Vietnamese Input Method Engine for Fcitx5"
+pkgdesc="An ultra-optimized, allocation-minimized C++20 Vietnamese Input Method Engine for Fcitx5"
 arch=('x86_64' 'aarch64')
 url="https://github.com/yourusername/vietnamesekey"
 license=('MIT')

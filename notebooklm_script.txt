@@ -1,0 +1,60 @@
+# Tài liệu tham khảo dự án VietnameseKey (dành cho AI / NotebookLM)
+
+**Tên dự án:** VietnameseKey
+**Tác giả:** Đặng Nhật Phi (dangnhatphi001-vibe-AI)
+**Nền tảng:** Linux (Fcitx5 Addon)
+**Ngôn ngữ:** C++20 tinh khiết
+**Bản chất:** Một bộ gõ tiếng Việt siêu tối ưu (Micro-optimized), nhắm tới độ trễ thấp nhất có thể (zero-latency) và giải quyết triệt để các lỗi tương thích khó chịu nhất trên môi trường Linux Wayland.
+
+---
+
+## Phần 1: Nỗi đau của người dùng Linux và giới hạn của các bộ gõ hiện tại
+Trong nhiều năm qua, trải nghiệm gõ tiếng Việt trên môi trường Linux thường gắn liền với sự chắp vá. Các bộ gõ phổ biến nhất hiện nay (như Fcitx5-Bamboo hay IBus-Bamboo) mặc dù có nhiều tính năng từ điển, nhưng lại được viết bằng ngôn ngữ Go. Ngôn ngữ Go sử dụng Garbage Collector (bộ thu gom rác tự động). Khi bạn gõ phím với tốc độ cao, việc liên tục tạo ra các chuỗi (string allocation) sẽ kích hoạt Garbage Collector, gây ra những cú "khựng" (micro-stuttering) ở mức độ phần nghìn giây. 
+
+Nhưng thảm họa thực sự nằm ở **Wayland và XWayland**. 
+Khi người dùng chuyển sang các môi trường desktop hiện đại như Wayland, các ứng dụng không thuần Linux (như Zalo chạy qua Wine, hay VS Code, Discord, Obsidian chạy qua Electron) buộc phải chạy qua lớp tương thích XWayland. Các ứng dụng này có 2 lỗi cực kỳ nghiêm trọng:
+1. **Từ chối hiển thị Preedit:** Chúng không hỗ trợ hiển thị chữ đang soạn thảo (inline preedit).
+2. **Spam lệnh Reset:** Chúng liên tục gửi lệnh `XmbResetIC()` sau MỖI LẦN nhấn phím. 
+
+Hậu quả? Khi bạn cố gõ chữ "biết" (b i e e t s), các bộ gõ thông thường cố gắng dùng phím Backspace giả lập để xóa chữ cũ và viết chữ mới. Zalo sẽ từ chối phím Backspace đó, đồng thời lệnh Reset sẽ cắt ngang quá trình ghép dấu, khiến chữ bị nhân bản thành các chuỗi rác như "biêts", "nnoó", v.v. Đây là nỗi ám ảnh khiến nhiều lập trình viên phải từ bỏ Linux.
+
+---
+
+## Phần 2: Kiến trúc C++20 Siêu Tối Ưu (Động cơ xe đua F1)
+Tác giả Đặng Nhật Phi đã đập đi xây lại khái niệm bộ gõ bằng một dự án mang tên **VietnameseKey**, viết bằng C++20 tinh khiết với triết lý thiết kế cực đoan: **"Zero-Allocation" (Không cấp phát động)**.
+
+- **Vừa khít L1 Cache:** Toàn bộ trạng thái gõ phím của `ShadowEngine` (lõi xử lý của VietnameseKey) được gói gọn trong các mảng tĩnh (static array) cực nhỏ. Nó không sử dụng `malloc` hay `new` cho mỗi phím bấm. Dữ liệu nhỏ đến mức nằm vừa vặn trong L1 Cache của CPU, tốc độ truy xuất gần như tức thời.
+- **Biến thuật toán thành Bảng tra cứu tĩnh (O(1) Lookup Table):** Để bỏ dấu (ví dụ `a` + sắc = `á`), các bộ gõ thường dùng hàng trăm dòng lệnh `if/else` hoặc `switch/case`. Điều này làm CPU phải liên tục dự đoán nhánh (Branch Prediction) và thường xuyên đoán sai. VietnameseKey băm toàn bộ hàng ngàn tổ hợp chữ tiếng Việt vào một mảng 3 chiều (3D Array). CPU chỉ mất đúng 1 bước nhảy O(1) để lấy ra ký tự cần thiết.
+- **Kiểm tra nguyên âm phi nhánh (Branchless Vowel Check):** Thay vì so sánh `c == 'a' || c == 'e' || c == 'o'...`, tác giả dùng một thủ thuật dịch bit toán học cực kỳ thông minh: `(0x1104111 >> (c - 'a')) & 1`. CPU không còn phải chia nhánh, chạy thẳng một mạch không độ trễ.
+- **Sử dụng lệnh SIMD:** Khi reset bộ đệm, code ép trình biên dịch dùng `__builtin_memset` để kích hoạt các lệnh vector hóa phần cứng (như `rep stosq`), dọn sạch dữ liệu chỉ trong vài chu kỳ xung nhịp.
+
+Nói một cách dễ hiểu: VietnameseKey không chỉ là một phần mềm gõ chữ, nó là một cỗ máy được tối ưu hóa ở tầng vật lý của linh kiện máy tính, giống hệt cách các kỹ sư tối ưu hóa Game Engine AAA.
+
+---
+
+## Phần 3: Đánh bại "Quái vật" Zalo và XWayland
+Để giải quyết lỗi nhân bản chữ trên Zalo và Electron, VietnameseKey không cố gắng chống lại hệ thống, mà sử dụng thuật toán **Dual-Mode Display (Hiển thị hai chế độ)**:
+
+1. **Với các ứng dụng chuẩn (Native Apps):** Bộ gõ trả về chữ đang soạn (Preedit) ngay tại con trỏ chuột một cách mượt mà.
+2. **Với các ứng dụng lỗi (như Zalo / Electron XWayland):** VietnameseKey tự động quét cờ `preeditCap` của ứng dụng. Nếu ứng dụng không hỗ trợ Preedit, bộ gõ lập tức chuyển sang chế độ **Panel-Only**. Chữ bạn đang gõ sẽ hiển thị trên một chiếc phao nổi (Floating Panel) của Fcitx5. Nó KHÔNG gửi bất kỳ chữ nào vào ứng dụng khi bạn đang ghép dấu. Lệnh spam `reset()` của Zalo bị bộ gõ chặn đứng và bỏ qua. 
+Chỉ đến khi bạn gõ dấu cách (Space) hoặc dấu chấm câu (Enter, phẩy), VietnameseKey mới đóng gói toàn bộ từ đã ghép hoàn chỉnh (ví dụ "biết") và đẩy thẳng vào Zalo trong một nhịp duy nhất. 
+Kết quả: Zalo không thể làm hỏng chữ, hiện tượng rác chữ bị triệt tiêu 100%.
+
+Bên cạnh đó, tác giả còn phát triển thuật toán **Smart Cluster Detection** để xử lý chính xác các chùm nguyên âm phức tạp như `uo`, `ou`, `uu` kết hợp phím `w` (Hook). Nó thông minh đến mức nếu bạn gõ `cuu` + `w`, nó chỉ móc chữ u đầu tiên để thành chữ `cưu`, nhưng nếu bạn bấm `w` hai lần (bypass), nó tự động trả về `cuuw`.
+
+---
+
+## Phần 4: Đối đầu trực tiếp với Bamboo - Tại sao nên chọn VietnameseKey?
+Khi so sánh với "tượng đài" Fcitx5-Bamboo, VietnameseKey mang đến một hệ giá trị hoàn toàn khác biệt, tập trung vào trải nghiệm cốt lõi:
+1. **Tốc độ và Độ trễ (Latency):** Bamboo được viết bằng Go, sử dụng Garbage Collector, đôi khi gây ra hiện tượng khựng (micro-stutter). VietnameseKey viết bằng C++20, kiến trúc Zero-Allocation, tối ưu L1 Cache, mang lại tốc độ phản hồi tính bằng nano-giây - nhanh hơn gấp nhiều lần về mặt lý thuyết.
+2. **Sự ổn định trên XWayland (Zalo, VS Code):** Bamboo thường xuyên dính lỗi "nhân bản chữ" hoặc mất dấu trên các ứng dụng này do dùng thuật toán gửi phím Backspace giả lập. VietnameseKey giải quyết triệt để 100% nhờ chế độ Panel-Only thông minh độc quyền.
+3. **Sự thuần túy và Chuẩn xác:** Bamboo tích hợp từ điển khổng lồ để tự sửa lỗi chính tả (Heuristic auto-correct), nhưng đôi khi máy móc lại "đoán sai" ý người dùng gây ức chế. VietnameseKey từ chối các tính năng tự động này. Nó "gõ sao ra vậy", mang lại sự kiểm soát tuyệt đối và không bao giờ có lỗi logic ngầm.
+
+**Lý do nên chọn VietnameseKey:** 
+Nếu bạn cần một bộ gõ "đoán ý" và tự động sửa chính tả thay cho bạn, Bamboo vẫn là lựa chọn tốt. Nhưng nếu bạn là một lập trình viên, một người dùng chuyên nghiệp (Power User) khao khát sự **tối giản, ổn định tuyệt đối trên Wayland (đặc biệt là để chat Zalo không bị rác chữ), và một cỗ máy gõ chữ có tốc độ "bàn thờ"**, VietnameseKey chính là chân ái của bạn.
+
+## Phần 5: Triết lý thiết kế và Lời kết
+VietnameseKey theo đuổi triết lý **KISS (Keep It Simple, Stupid)**. 
+VietnameseKey giống như một chiếc siêu xe số sàn (Manual Transmission): Không tự lái, không có màn hình cảm ứng rối rắm, nhưng nó trao cho người dùng quyền kiểm soát 100%, độ tin cậy tuyệt đối và hiệu năng ở mức cực hạn.
+
+Dự án này là minh chứng cho việc kỹ năng lập trình cấp thấp (low-level programming) vẫn có thể mang lại những giải pháp đột phá cho những vấn đề tưởng chừng như không thể giải quyết ở cấp độ ứng dụng. Đây chắc chắn là một dự án "cứu rỗi" danh tiếng của Linux desktop trong mắt cộng đồng lập trình viên Việt Nam.

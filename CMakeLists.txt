@@ -41,3 +41,6 @@ install(FILES
     inputmethod/vietnamesekey-vni.conf 
     DESTINATION "${FCITX_INSTALL_PKGDATADIR}/inputmethod"
 )
+
+# Cài đặt logo vào system icon theme
+install(FILES assets/logo.png DESTINATION "share/icons/hicolor/256x256/apps" RENAME "vietnamesekey.png")

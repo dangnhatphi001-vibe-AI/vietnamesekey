@@ -56,7 +56,7 @@ public:
                              "vi",
                              "vietnamesekey");
         entries.back()
-            .setIcon("keyboard")
+            .setIcon("vietnamesekey")
             .setLabel("vi")
             .setConfigurable(false);
 
@@ -65,7 +65,7 @@ public:
                              "vi",
                              "vietnamesekey");
         entries.back()
-            .setIcon("keyboard")
+            .setIcon("vietnamesekey")
             .setLabel("vi")
             .setConfigurable(false);
         return entries;

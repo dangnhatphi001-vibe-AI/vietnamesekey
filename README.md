@@ -1,9 +1,5 @@
 # vietnamesekey (Fcitx5 Vietnamese IME)
 
-<p align="center">
-  <img src="assets/logo.png" alt="PHISHADOW Logo" width="300"/>
-</p>
-
 [![C++ Standard](https://img.shields.io/badge/C%2B%2B-20-blue.svg?style=flat-square)](https://en.cppreference.com/w/cpp/20)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](https://opensource.org/licenses/MIT)
 [![Platform](https://img.shields.io/badge/Platform-Linux-lightgrey.svg?style=flat-square)](https://www.linux.org/)

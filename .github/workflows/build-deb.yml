@@ -23,6 +23,7 @@ jobs:
       BUILD_TYPE: Release
       PACKAGE_NAME: fcitx5-vietnamesekey
       DEB_NAME: fcitx5-vietnamesekey_amd64.deb
+      FULL_DEB_NAME: fcitx5-vietnamesekey-full_amd64.deb
 
     steps:
       - name: Checkout source
@@ -68,6 +69,14 @@ jobs:
           set -euo pipefail
           scripts/build-deb-local.sh "${{ steps.version.outputs.version }}"
 
+      - name: Build full Debian package
+        shell: bash
+        env:
+          HOMEPAGE: https://github.com/${{ github.repository }}
+        run: |
+          set -euo pipefail
+          scripts/build-full-deb-local.sh "${{ steps.version.outputs.version }}"
+
       - name: Create GitHub Release and upload deb
         env:
           GH_TOKEN: ${{ github.token }}
@@ -76,12 +85,12 @@ jobs:
           set -euo pipefail
           notes_file="RELEASE_NOTES_${GITHUB_REF_NAME}.md"
           if [[ -f "${notes_file}" ]]; then
-            gh release create "${GITHUB_REF_NAME}" "${DEB_NAME}" \
+            gh release create "${GITHUB_REF_NAME}" "${DEB_NAME}" "${FULL_DEB_NAME}" \
               --title "VietnameseKey ${GITHUB_REF_NAME}" \
               --notes-file "${notes_file}" \
               --verify-tag
           else
-            gh release create "${GITHUB_REF_NAME}" "${DEB_NAME}" \
+            gh release create "${GITHUB_REF_NAME}" "${DEB_NAME}" "${FULL_DEB_NAME}" \
               --title "VietnameseKey ${GITHUB_REF_NAME}" \
               --notes "Automated Debian package release for ${GITHUB_REF_NAME}." \
               --verify-tag

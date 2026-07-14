@@ -1,6 +1,7 @@
 build/
 build-*/
 package-root/
+package-root-*/
 *.deb
 *.so
 *.o

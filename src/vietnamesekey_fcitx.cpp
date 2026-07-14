@@ -7,6 +7,7 @@
 #include <fcitx/instance.h>
 #include <fcitx-utils/key.h>
 #include <fcitx-utils/keysym.h>
+#include <array>
 #include <string>
 #include <vector>
 #include <fcitx/inputpanel.h>
@@ -79,19 +80,6 @@ public:
         fcitx::InputContext* ic = ke.inputContext();
         if (!ic) return;
 
-        // ── DEBUG: log once per InputContext to understand app connection ──
-        static std::string last_prog;
-        std::string cur_prog = ic->program();
-        if (cur_prog != last_prog) {
-            last_prog = cur_prog;
-            fprintf(stderr, "[VK-DEBUG] program='%s' display='%s' "
-                    "preeditEnabled=%d preeditCap=%d\n",
-                    cur_prog.c_str(),
-                    ic->display().c_str(),
-                    ic->isPreeditEnabled() ? 1 : 0,
-                    ic->capabilityFlags().test(fcitx::CapabilityFlag::Preedit) ? 1 : 0);
-        }
-
         const uint8_t mode =
             (entry.uniqueName() == "vietnamesekey-vni") ? 1u : 0u;
 
@@ -104,71 +92,11 @@ public:
         else if (sym == FcitxKey_dead_tilde) sym = FcitxKey_asciitilde;
         else if (sym == FcitxKey_dead_grave) sym = FcitxKey_grave;
         else if (sym == FcitxKey_dead_acute) sym = FcitxKey_acute;
+        else if (sym == FcitxKey_notsign) sym = FcitxKey_asciitilde; // Fix ¬ to ~
 
-        // Pass through modifier combos untouched
-        if ((states & fcitx::KeyState::Ctrl) ||
-            (states & fcitx::KeyState::Alt)  ||
-            (states & fcitx::KeyState::Super)) {
-            flush(ic);
-            return;
-        }
-
-        // Escape: discard composition
-        if (sym == FcitxKey_Escape) {
-            if (engine_.has_composition()) {
-                discard(ic);
-                ke.filterAndAccept();
-            }
-            return;
-        }
-
-        // Enter: commit as-is
-        if (sym == FcitxKey_Return || sym == FcitxKey_KP_Enter) {
-            flush(ic);
-            return;
-        }
-
-        // Backspace inside composition
-        if (sym == FcitxKey_BackSpace) {
-            if (engine_.has_composition()) {
-                char32_t obuf[32];
-                size_t   olen = 0;
-                engine_.process_key(8, mode, obuf, olen);
-                show(ic, obuf, olen);
-                ke.filterAndAccept();
-            }
-            return;
-        }
-
-        // Non-printable ASCII: flush and pass through
-        if (sym < 32 || sym > 126) {
-            flush(ic);
-            return;
-        }
-
-        // Word break: flush and let the key pass through to app
-        if (ShadowEngine::is_word_break(static_cast<char32_t>(sym), mode)) {
-            flush(ic);
-            return;
-        }
-
-        // ── Main composition path ──
-        char32_t obuf[32];
-        size_t   olen = 0;
-        const bool consumed =
-            engine_.process_key(static_cast<char32_t>(sym), mode, obuf, olen);
-
-        if (consumed) {
-            show(ic, obuf, olen);
+        KeyEventItem item(sym, states, mode);
+        if (enqueue(item) && drain_queue(ic)) {
             ke.filterAndAccept();
-        } else {
-            // Engine says "not part of Vietnamese" — commit whatever we had
-            if (olen > 0) {
-                // Engine returned final output
-                commit_buf(ic, obuf, olen);
-            } else {
-                flush(ic);
-            }
         }
     }
 
@@ -176,13 +104,7 @@ public:
 
     void reset(const fcitx::InputMethodEntry&,
                fcitx::InputContextEvent&) override {
-        // DO NOT flush here. Many apps (especially Electron/Wine/XWayland clients)
-        // call reset() between every keystroke, which destroys the composition
-        // mid-word (e.g. "biêt" + reset + "s" = "biêts" instead of "biết").
-        // The composition will be committed naturally when:
-        //   - The user types a word-break (space, punctuation, Enter)
-        //   - The user switches apps (deactivate() handles this)
-        //   - The user presses Escape (keyEvent handles this)
+        // No-op to protect composition on buggy apps.
     }
 
     void deactivate(const fcitx::InputMethodEntry& entry,
@@ -196,97 +118,186 @@ public:
     }
 
 private:
+    struct KeyEventItem {
+        KeyEventItem() : sym(FcitxKey_None), states(0), mode(0) {}
+        KeyEventItem(FcitxKeySym sym_,
+                     fcitx::KeyStates states_,
+                     uint8_t mode_)
+            : sym(sym_), states(states_), mode(mode_) {}
+
+        FcitxKeySym      sym;
+        fcitx::KeyStates states;
+        uint8_t          mode;
+    };
+
     fcitx::Instance* instance_;
     ShadowEngine     engine_;
-    char             m_utf8[256];  // cached UTF-8 buffer (avoid repeated encoding)
-    size_t           m_utf8n = 0;  // cached length
-    size_t           m_inline_chars = 0; // codepoints live-committed for no-preedit clients
 
-    // ── Client strategy ──
+    static constexpr size_t kQueueCapacity = 64;
+    std::array<KeyEventItem, kQueueCapacity> queue_{};
+    size_t queue_head_ = 0;
+    size_t queue_tail_ = 0;
+    size_t queue_size_ = 0;
+    bool   draining_ = false;
 
-    static bool contains_ascii_casefold(const std::string& text,
-                                        const char* needle) {
-        if (!needle || needle[0] == '\0') return true;
+    // Cached buffers for allocation-minimized hot path
+    char        m_utf8[256];
+    size_t      m_utf8n = 0;
+    std::string m_cached_str;
 
-        size_t needle_len = 0;
-        while (needle[needle_len] != '\0') ++needle_len;
-        if (text.size() < needle_len) return false;
-
-        for (size_t i = 0; i + needle_len <= text.size(); ++i) {
-            size_t j = 0;
-            for (; j < needle_len; ++j) {
-                char a = text[i + j];
-                char b = needle[j];
-                if (a >= 'A' && a <= 'Z') a = static_cast<char>(a - 'A' + 'a');
-                if (b >= 'A' && b <= 'Z') b = static_cast<char>(b - 'A' + 'a');
-                if (a != b) break;
-            }
-            if (j == needle_len) return true;
+    bool enqueue(const KeyEventItem& item) {
+        if (queue_size_ == kQueueCapacity) {
+            return false;
         }
-        return false;
+        queue_[queue_tail_] = item;
+        queue_tail_ = (queue_tail_ + 1) % kQueueCapacity;
+        ++queue_size_;
+        return true;
     }
 
-    static bool is_wayland(fcitx::InputContext* ic) {
-        const std::string d = ic->display();
-        return d.compare(0, 8, "wayland:") == 0 ||
-               d.compare(0, 8, "wayland-") == 0;
+    bool pop(KeyEventItem& item) {
+        if (queue_size_ == 0) {
+            return false;
+        }
+        item = queue_[queue_head_];
+        queue_head_ = (queue_head_ + 1) % kQueueCapacity;
+        --queue_size_;
+        return true;
     }
 
-    static bool force_inline_commit(fcitx::InputContext*) {
-        // Use preedit for all apps. The key to making this work is that
-        // reset() is a no-op (see above), so the composition survives
-        // between keystrokes even on buggy apps.
-        return false;
+    bool drain_queue(fcitx::InputContext* ic) {
+        if (draining_) {
+            return false;
+        }
+
+        bool accepted = false;
+        draining_ = true;
+        KeyEventItem item{};
+        while (pop(item)) {
+            accepted = process_queued_key(ic, item) || accepted;
+            publish_barrier(ic);
+        }
+        draining_ = false;
+        return accepted;
     }
 
-    static bool can_use_preedit(fcitx::InputContext* ic) {
-        return ic->isPreeditEnabled() &&
-               ic->capabilityFlags().test(fcitx::CapabilityFlag::Preedit) &&
-               !force_inline_commit(ic);
-    }
+    bool process_queued_key(fcitx::InputContext* ic, const KeyEventItem& item) {
+        const FcitxKeySym      sym = item.sym;
+        const fcitx::KeyStates states = item.states;
+        const uint8_t          mode = item.mode;
 
-    // ── Encode once, use twice ──
+        // Pass through modifier combos untouched
+        if ((states & fcitx::KeyState::Ctrl) ||
+            (states & fcitx::KeyState::Alt)  ||
+            (states & fcitx::KeyState::Super)) {
+            flush(ic);
+            return false;
+        }
+
+        // Escape: discard composition
+        if (sym == FcitxKey_Escape) {
+            if (engine_.has_composition()) {
+                discard(ic);
+                return true;
+            }
+            return false;
+        }
+
+        // Enter: commit as-is
+        if (sym == FcitxKey_Return || sym == FcitxKey_KP_Enter) {
+            if (engine_.has_composition()) {
+                flush(ic);
+                return true;
+            }
+            return false;
+        }
+
+        // Backspace inside composition
+        if (sym == FcitxKey_BackSpace) {
+            if (engine_.has_composition()) {
+                char32_t obuf[32];
+                size_t   olen = 0;
+                engine_.process_key(8, mode, obuf, olen);
+                show(ic, obuf, olen);
+                return true;
+            }
+            return false;
+        }
+
+        // Word break (Space, punctuation): append to composition and commit together
+        // This is a CRITICAL fix for "rớt chữ" on fast typing. By committing the word
+        // and the space/punctuation in a SINGLE IPC message, we eliminate Wayland races.
+        if (ShadowEngine::is_word_break(static_cast<char32_t>(sym), mode)) {
+            if (engine_.has_composition()) {
+                char32_t obuf[33]; // +1 for the word break char
+                size_t   olen = 0;
+                engine_.get_composition(obuf, olen);
+
+                // Append the punctuation / space
+                if (olen < 32) {
+                    obuf[olen++] = static_cast<char32_t>(sym);
+                }
+
+                commit_buf(ic, obuf, olen);
+                return true;
+            }
+            return false; // If no composition, pass through natively.
+        }
+
+        // Non-printable ASCII (arrows, etc): flush and pass through
+        if (sym < 32 || sym > 126) {
+            flush(ic);
+            return false;
+        }
+
+        // ── Main composition path ──
+        char32_t obuf[32];
+        size_t   olen = 0;
+        const bool consumed =
+            engine_.process_key(static_cast<char32_t>(sym), mode, obuf, olen);
+
+        if (consumed) {
+            show(ic, obuf, olen);
+            return true;
+        } else {
+            if (olen > 0) {
+                commit_buf(ic, obuf, olen);
+            } else {
+                flush(ic);
+            }
+            return false;
+        }
+    }
 
     void encode(const char32_t* buf, size_t len) {
         m_utf8n = (len > 0)
             ? encode_utf8(buf, len, m_utf8, sizeof(m_utf8) - 1)
             : 0;
         m_utf8[m_utf8n] = '\0';
+        m_cached_str.assign(m_utf8, m_utf8n); // O(n) copy, zero heap alloc
     }
 
-    // ── Core display ──
-    //
-    // Preedit-capable apps use client preedit. Apps without usable preedit
-    // need visible inline text, so they get ordered Backspace + commitString
-    // replacement instead of deleteSurroundingText, which is flaky on Wayland.
-    //
-    // Strategy per platform:
-    //   X11:          forwardKey(BackSpace) to erase prior inline chars,
-    //                 then commitString — reliable synthetic keystrokes.
-    //   Wayland:      deleteSurroundingText to erase prior chars,
-    //                 then commitString — forwardKey is unreliable on Wayland.
+    static bool has_client_preedit(fcitx::InputContext* ic) {
+        return ic->isPreeditEnabled() &&
+               ic->capabilityFlags().test(fcitx::CapabilityFlag::Preedit);
+    }
 
     void show(fcitx::InputContext* ic, const char32_t* obuf, size_t olen) {
         encode(obuf, olen);
 
-        std::string s(m_utf8, m_utf8n);
-
-        if (can_use_preedit(ic)) {
-            // App supports preedit → show inline in the app's text field
+        if (has_client_preedit(ic)) {
             fcitx::Text client;
             if (m_utf8n > 0) {
-                client.append(s);
+                client.append(m_cached_str);
                 client.setCursor(static_cast<int>(m_utf8n));
             }
             ic->inputPanel().setClientPreedit(client);
         }
 
-        // Always set panel preedit (floating popup near cursor).
-        // For apps WITHOUT preedit (like Zalo), this is the ONLY visual feedback.
-        // For apps WITH preedit, this is a redundant fallback (harmless).
+        // Always show floating panel so Zalo/Minecraft users can see the "hộp chữ"
         fcitx::Text panel;
         if (m_utf8n > 0) {
-            panel.append(s);
+            panel.append(m_cached_str);
         }
         ic->inputPanel().setPreedit(panel);
 
@@ -294,78 +305,48 @@ private:
         ic->updateUserInterface(fcitx::UserInterfaceComponent::InputPanel);
     }
 
-    void show_inline_commit(fcitx::InputContext* ic, size_t olen) {
-        // Use synthetic Backspace keys.
-        // deleteSurroundingText is ignored by many Electron/Chromium apps on Wayland,
-        // which leads to duplicated ghost text (e.g. n -> nno -> nnonó).
-        for (size_t i = 0; i < m_inline_chars; ++i) {
-            ic->forwardKey(fcitx::Key(FcitxKey_BackSpace));
-        }
-
-        if (m_utf8n > 0) {
-            ic->commitString(std::string(m_utf8, m_utf8n));
-        }
-        m_inline_chars = olen;
-        clear_preedit(ic);
-    }
-
-    // ── Commit final text and clear everything ──
-
     void commit_buf(fcitx::InputContext* ic, const char32_t* obuf, size_t olen) {
         encode(obuf, olen);
-        if (m_inline_chars > 0) {
-            show_inline_commit(ic, olen);
-            wipe(ic);
-            return;
-        }
         if (m_utf8n > 0) {
-            ic->commitString(std::string(m_utf8, m_utf8n));
+            ic->commitString(m_cached_str);
         }
         wipe(ic);
     }
 
-    // ── Flush: commit current composition and reset ──
-
     void flush(fcitx::InputContext* ic) {
         if (engine_.has_composition()) {
-            if (m_inline_chars > 0) {
-                wipe(ic);
-                return;
-            }
-
             char32_t obuf[32];
             size_t olen = 0;
             engine_.get_composition(obuf, olen);
             if (olen > 0) {
                 encode(obuf, olen);
-                ic->commitString(std::string(m_utf8, m_utf8n));
+                ic->commitString(m_cached_str);
             }
             wipe(ic);
         }
     }
 
-    // ── Discard composition text ──
-
     void discard(fcitx::InputContext* ic) {
-        for (size_t i = 0; i < m_inline_chars; ++i) {
-            ic->forwardKey(fcitx::Key(FcitxKey_BackSpace));
-        }
         wipe(ic);
     }
-
-    // ── Wipe all state and clear UI ──
 
     void wipe(fcitx::InputContext* ic) {
         engine_.reset();
         m_utf8n = 0;
-        m_inline_chars = 0;
+        m_cached_str.clear();
 
         clear_preedit(ic);
     }
 
     void clear_preedit(fcitx::InputContext* ic) {
-        ic->inputPanel().setPreedit(fcitx::Text());
-        ic->inputPanel().setClientPreedit(fcitx::Text());
+        fcitx::Text empty;
+        ic->inputPanel().setPreedit(empty);
+        ic->inputPanel().setClientPreedit(empty);
+        ic->updatePreedit();
+        ic->updateUserInterface(fcitx::UserInterfaceComponent::InputPanel);
+    }
+
+    void publish_barrier(fcitx::InputContext* ic) {
         ic->updatePreedit();
         ic->updateUserInterface(fcitx::UserInterfaceComponent::InputPanel);
     }

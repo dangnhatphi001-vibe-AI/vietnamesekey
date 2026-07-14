@@ -1,5 +1,7 @@
 build/
 build-*/
+package-root/
+*.deb
 *.so
 *.o
 .DS_Store

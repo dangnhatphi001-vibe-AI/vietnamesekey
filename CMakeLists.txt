@@ -7,6 +7,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 find_package(Fcitx5Core REQUIRED)
 find_package(Fcitx5Utils REQUIRED)
 
+option(VKEY_MARCH_NATIVE "Build with -march=native for the local machine" ON)
+
 add_library(vietnamesekey MODULE
     src/shadow_engine.cpp
     src/vietnamesekey_fcitx.cpp
@@ -19,12 +21,15 @@ target_include_directories(vietnamesekey PRIVATE
 
 target_compile_options(vietnamesekey PRIVATE
     -O3
-    -march=native
     -flto
     -fno-exceptions
     -Wall
     -Wextra
 )
+
+if(VKEY_MARCH_NATIVE)
+    target_compile_options(vietnamesekey PRIVATE -march=native)
+endif()
 
 target_link_options(vietnamesekey PRIVATE -flto)
 target_link_libraries(vietnamesekey PRIVATE Fcitx5::Core Fcitx5::Utils)

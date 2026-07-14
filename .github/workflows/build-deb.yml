@@ -1,0 +1,88 @@
+name: Build Debian Package
+
+on:
+  push:
+    tags:
+      - "v*"
+      - "V*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-deb:
+    name: Build and publish amd64 deb
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    env:
+      BUILD_TYPE: Release
+      PACKAGE_NAME: fcitx5-vietnamesekey
+      DEB_NAME: fcitx5-vietnamesekey_amd64.deb
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve release version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          version="${tag#v}"
+          version="${version#V}"
+          if [[ ! "${version}" =~ ^[0-9]+([.][0-9]+)*([+-][A-Za-z0-9.~_-]+)?$ ]]; then
+            echo "Invalid Debian version derived from tag: ${tag}" >&2
+            exit 1
+          fi
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+
+      - name: Install build dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            ca-certificates \
+            cmake \
+            dpkg-dev \
+            extra-cmake-modules \
+            fcitx5 \
+            file \
+            libfcitx5core-dev \
+            libfcitx5utils-dev
+
+      - name: Build Debian package
+        shell: bash
+        env:
+          HOMEPAGE: https://github.com/${{ github.repository }}
+        run: |
+          set -euo pipefail
+          scripts/build-deb-local.sh "${{ steps.version.outputs.version }}"
+
+      - name: Create GitHub Release and upload deb
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          notes_file="RELEASE_NOTES_${GITHUB_REF_NAME}.md"
+          if [[ -f "${notes_file}" ]]; then
+            gh release create "${GITHUB_REF_NAME}" "${DEB_NAME}" \
+              --title "VietnameseKey ${GITHUB_REF_NAME}" \
+              --notes-file "${notes_file}" \
+              --verify-tag
+          else
+            gh release create "${GITHUB_REF_NAME}" "${DEB_NAME}" \
+              --title "VietnameseKey ${GITHUB_REF_NAME}" \
+              --notes "Automated Debian package release for ${GITHUB_REF_NAME}." \
+              --verify-tag
+          fi

@@ -157,16 +157,28 @@ constexpr char32_t lookup_vietnamese_char(char32_t base_char, uint32_t tone, uin
         default: return base_char;
     }
 
+    // Mask out standalone flag (1<<9) before lookup — it shares char_mod but not part of table
+    mod &= ~(1u << 9);
     int tone_idx = 0;
     if (tone) {
-        tone_idx = __builtin_ctz(tone) + 1; // TONE_SAC=1(bit 0), so ctz=0 -> idx=1
-        if (tone_idx > 5) tone_idx = 0; // fallback
+        // Guard against corrupted multi-bit tone (must be power of two)
+        if ((tone & (tone - 1)) != 0) {
+            tone_idx = 0;
+        } else {
+            tone_idx = __builtin_ctz(tone) + 1; // TONE_SAC=1(bit 0), so ctz=0 -> idx=1
+            if (tone_idx > 5) tone_idx = 0; // fallback
+        }
     }
 
     int mod_idx = 0;
     if (mod) {
-        mod_idx = __builtin_ctz(mod) - 4; // MOD_HAT=1<<5 -> ctz=5 -> idx=1
-        if (mod_idx < 0 || mod_idx > 4) mod_idx = 0; // fallback
+        if ((mod & (mod - 1)) != 0) {
+            // Multiple modifier bits — invalid, fallback to NONE (table holds base_char)
+            mod_idx = 0;
+        } else {
+            mod_idx = __builtin_ctz(mod) - 4; // MOD_HAT=1<<5 -> ctz=5 -> idx=1
+            if (mod_idx < 0 || mod_idx > 4) mod_idx = 0; // fallback
+        }
     }
 
     char32_t result = VN_CHAR_TABLE[base_idx][mod_idx][tone_idx];

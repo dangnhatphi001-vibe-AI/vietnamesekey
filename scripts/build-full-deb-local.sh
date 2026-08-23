@@ -57,7 +57,6 @@ install -d \
 
 cat > "${PACKAGE_ROOT}/etc/environment.d/80-fcitx5-vietnamesekey.conf" <<'EOF'
 XMODIFIERS=@im=fcitx
-GTK_IM_MODULE=fcitx
 QT_IM_MODULE=fcitx
 QT_IM_MODULES=wayland;fcitx
 SDL_IM_MODULE=fcitx
@@ -68,8 +67,8 @@ cat > "${PACKAGE_ROOT}/etc/xdg/fcitx5/profile" <<'EOF'
 [Groups/0]
 # Group Name
 Name=Default
-# UK keyboard layout in XKB/Fcitx is "gb".
-Default Layout=gb
+# US keyboard layout in XKB/Fcitx is "us".
+Default Layout=us
 # Default Input Method
 DefaultIM=vietnamesekey-telex
 
@@ -77,7 +76,7 @@ DefaultIM=vietnamesekey-telex
 # Name
 Name=vietnamesekey-telex
 # Layout
-Layout=gb
+Layout=us
 
 [GroupOrder]
 0=Default
@@ -124,12 +123,12 @@ backup_file "${ENV_DIR}/80-fcitx5.conf"
 cat > "${CONFIG_DIR}/profile" <<'PROFILE'
 [Groups/0]
 Name=Default
-Default Layout=gb
+Default Layout=us
 DefaultIM=vietnamesekey-telex
 
 [Groups/0/Items/0]
 Name=vietnamesekey-telex
-Layout=gb
+Layout=us
 
 [GroupOrder]
 0=Default
@@ -145,7 +144,6 @@ CONFIG
 
 cat > "${ENV_DIR}/80-fcitx5.conf" <<'ENVCONF'
 XMODIFIERS=@im=fcitx
-GTK_IM_MODULE=fcitx
 QT_IM_MODULE=fcitx
 QT_IM_MODULES=wayland;fcitx
 SDL_IM_MODULE=fcitx
@@ -154,17 +152,17 @@ ENVCONF
 
 if command -v systemctl >/dev/null 2>&1; then
     systemctl --user import-environment \
-        XMODIFIERS GTK_IM_MODULE QT_IM_MODULE QT_IM_MODULES SDL_IM_MODULE INPUT_METHOD \
+        XMODIFIERS QT_IM_MODULE QT_IM_MODULES SDL_IM_MODULE INPUT_METHOD \
         >/dev/null 2>&1 || true
 fi
 
 if command -v dbus-update-activation-environment >/dev/null 2>&1; then
     dbus-update-activation-environment --systemd \
-        XMODIFIERS GTK_IM_MODULE QT_IM_MODULE QT_IM_MODULES SDL_IM_MODULE INPUT_METHOD \
+        XMODIFIERS QT_IM_MODULE QT_IM_MODULES SDL_IM_MODULE INPUT_METHOD \
         >/dev/null 2>&1 || true
 fi
 
-echo "VietnameseKey user profile configured with UK keyboard layout (gb)."
+echo "VietnameseKey user profile configured with US keyboard layout (us)."
 echo "Restart Fcitx5 or log out/in for every application to inherit the new environment."
 EOF
 
@@ -184,7 +182,7 @@ Installed defaults:
 * System environment: /etc/environment.d/80-fcitx5-vietnamesekey.conf
 * System Fcitx5 profile: /etc/xdg/fcitx5/profile
 * Default IM: vietnamesekey-telex
-* Keyboard layout: UK / XKB "gb"
+* Keyboard layout: US / XKB "us"
 
 Existing user profiles under ~/.config/fcitx5 are not overwritten during
 package installation. To apply the same defaults to an existing desktop user,
@@ -210,7 +208,7 @@ fcitx5-vietnamesekey-full installed.
 
 System defaults are installed under /etc. Existing user profiles are not
 overwritten automatically. Existing desktop users can apply the bundled
-VietnameseKey + UK layout profile with:
+VietnameseKey + US layout profile with:
 
     fcitx5-vietnamesekey-setup
 
@@ -258,11 +256,11 @@ Replaces: fcitx5-vietnamesekey
 Provides: fcitx5-vietnamesekey
 Installed-Size: ${installed_size}
 Homepage: ${HOMEPAGE}
-Description: Full VietnameseKey Fcitx5 setup with UK keyboard layout
+Description: Full VietnameseKey Fcitx5 setup with standard US keyboard layout
  VietnameseKey Full installs the optimized VietnameseKey Fcitx5 addon,
  Telex and VNI input method metadata, Fcitx5 runtime dependencies, and
- system defaults for a ready-to-use Vietnamese IME setup using the UK
- keyboard layout (XKB gb).
+ system defaults for a ready-to-use Vietnamese IME setup using the standard
+ US keyboard layout (XKB us).
 EOF
 
 chmod 0644 "${PACKAGE_ROOT}/DEBIAN/control"

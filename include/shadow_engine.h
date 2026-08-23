@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include "vn_constants.h"
 
 // ShadowEngine: ultra-low-latency, zero-dynamic-allocation Vietnamese composition engine.
 //
@@ -33,8 +34,8 @@ public:
     // Called externally when the caller needs to commit on word-break / focus-out.
     void get_composition(char32_t* output_str, size_t& out_len) const;
 
-    // True if there is pending composition text.
-    bool has_composition() const { return buffer_length > 0; }
+    // True if there is pending composition text (including pending tone).
+    bool has_composition() const { return buffer_length > 0 || current_tone != TONE_NONE; }
 
     // Fully clear all state (call on focus-out, deactivate, or hard reset).
     void reset();

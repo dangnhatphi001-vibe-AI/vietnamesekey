@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.12)
-project(vietnamesekey VERSION 1.0.0 LANGUAGES CXX)
+project(vietnamesekey VERSION 3.0.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -35,6 +35,17 @@ target_link_options(vietnamesekey PRIVATE -flto)
 target_link_libraries(vietnamesekey PRIVATE Fcitx5::Core Fcitx5::Utils)
 
 set_target_properties(vietnamesekey PROPERTIES PREFIX "")
+
+# ── Tests (ctest) ────────────────────────────────────────────────────────────
+option(VKEY_BUILD_TESTS "Build ShadowEngine test suite" ON)
+if(VKEY_BUILD_TESTS)
+    enable_testing()
+    add_executable(vkey_test tests/test_shadow_engine.cpp src/shadow_engine.cpp)
+    target_include_directories(vkey_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    target_compile_features(vkey_test PRIVATE cxx_std_20)
+    target_compile_options(vkey_test PRIVATE -O2 -Wall -Wextra)
+    add_test(NAME shadow_engine COMMAND vkey_test)
+endif()
 
 # Tự động cài đặt file thư viện .so
 install(TARGETS vietnamesekey DESTINATION "${FCITX_INSTALL_ADDONDIR}")

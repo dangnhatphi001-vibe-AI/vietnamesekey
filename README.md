@@ -2,7 +2,7 @@
 
 VietnameseKey is a low-latency Vietnamese Input Method Engine for Linux. It is implemented as a native Fcitx5 addon in C++20 and provides Telex and VNI input methods.
 
-The v2.5.x line focuses on stable composition on Wayland, XWayland, Electron, Flatpak, AppImage, Wine, and other non-native application stacks. The Fcitx5 boundary processes key events through a FIFO queue and keeps non-native clients on a floating composition panel path, avoiding fragile live text replacement.
+The v3.0 line focuses on stable composition on Wayland, XWayland, Electron, Flatpak, AppImage, Wine, and other non-native application stacks. The Fcitx5 boundary keeps per-InputContext state, coalesces floating-panel updates (15ms) and keeps non-native clients on a floating composition panel path, avoiding fragile live text replacement and `nnhnha` duplication.
 
 ## Features
 
@@ -10,10 +10,11 @@ The v2.5.x line focuses on stable composition on Wayland, XWayland, Electron, Fl
 - Telex and VNI input methods.
 - C++20 core with fixed-size composition buffers.
 - Per-character modifier state for Vietnamese vowel/consonant transforms.
-- FIFO key-event serialization at the Fcitx5 integration layer.
+- Per-InputContext state and FIFO key-event serialization at the Fcitx5 integration layer.
 - Inline preedit for clients that support it.
-- Floating panel composition for no-preedit/non-native clients.
+- Floating panel composition (15ms coalesced) for no-preedit/non-native clients.
 - Word-level commit on space, punctuation, Enter, focus switch, or explicit flush.
+- Smart Backspace (undo tone → undo modifier → delete) and `z` undo.
 - No `deleteSurroundingText` replacement path.
 - No synthetic Backspace live replacement path.
 
@@ -47,11 +48,11 @@ Default full-package profile:
 
 ```text
 DefaultIM=vietnamesekey-telex
-Default Layout=gb
-Layout=gb
+Default Layout=us
+Layout=us
 ```
 
-In Fcitx/XKB, UK keyboard layout is `gb`.
+In Fcitx/XKB, standard US keyboard layout is `us`.
 
 ## Install From Release
 
@@ -130,13 +131,13 @@ fcitx5 -r -d
 Addon-only package:
 
 ```bash
-scripts/build-deb-local.sh 2.5.1
+scripts/build-deb-local.sh 3.0.0
 ```
 
 Full package:
 
 ```bash
-scripts/build-full-deb-local.sh 2.5.1
+scripts/build-full-deb-local.sh 3.0.0
 ```
 
 Output files:
@@ -159,9 +160,9 @@ It runs when a tag matching `v*` or `V*` is pushed.
 Example:
 
 ```bash
-git tag -a v2.5.1 -m "VietnameseKey v2.5.1"
+git tag -a v3.0.0 -m "VietnameseKey v3.0.0"
 git push origin main
-git push origin v2.5.1
+git push origin v3.0.0
 ```
 
 The workflow builds and uploads:

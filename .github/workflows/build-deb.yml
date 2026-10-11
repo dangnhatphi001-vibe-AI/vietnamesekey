@@ -17,15 +17,20 @@ jobs:
   build-deb:
     name: Build and publish amd64 deb
     runs-on: ubuntu-latest
+    container: ubuntu:26.04
     timeout-minutes: 20
 
     env:
+      CXX: g++-15
       BUILD_TYPE: Release
       PACKAGE_NAME: fcitx5-vietnamesekey
       DEB_NAME: fcitx5-vietnamesekey_amd64.deb
       FULL_DEB_NAME: fcitx5-vietnamesekey-full_amd64.deb
 
     steps:
+      - name: Prepare checkout tools
+        run: apt-get update && apt-get install -y --no-install-recommends git ca-certificates
+
       - name: Checkout source
         uses: actions/checkout@v4
         with:
@@ -49,17 +54,28 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
+          apt-get update
+          apt-get install -y --no-install-recommends \
             build-essential \
+            g++-15 \
             ca-certificates \
             cmake \
             dpkg-dev \
             extra-cmake-modules \
             fcitx5 \
             file \
+            gh \
             libfcitx5core-dev \
             libfcitx5utils-dev
+
+      - name: Build and test (ctest + bench)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_STANDARD=26 -DVKEY_MARCH_NATIVE=OFF -DVKEY_BUILD_TESTS=ON
+          cmake --build build --parallel "$(nproc)"
+          ctest --test-dir build --output-on-failure
+          ./build/vkey_bench
 
       - name: Build Debian package
         shell: bash
@@ -83,8 +99,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          notes_file="RELEASE_NOTES_${GITHUB_REF_NAME}.md"
-          if [[ -f "${notes_file}" ]]; then
+          # GITHUB_REF_NAME is the raw tag ("v3.1.0"), but release notes in the repo may
+          # use either case for the leading v/V. Probe both instead of guessing one.
+          notes_file=""
+          for cand in "RELEASE_NOTES_${GITHUB_REF_NAME}.md" \
+                      "RELEASE_NOTES_${GITHUB_REF_NAME^}.md" \
+                      "RELEASE_NOTES_${GITHUB_REF_NAME^^}.md"; do
+            if [[ -f "${cand}" ]]; then notes_file="${cand}"; break; fi
+          done
+          echo "notes_file=${notes_file}"
+          if [[ -n "${notes_file}" ]]; then
             gh release create "${GITHUB_REF_NAME}" "${DEB_NAME}" "${FULL_DEB_NAME}" \
               --title "VietnameseKey ${GITHUB_REF_NAME}" \
               --notes-file "${notes_file}" \

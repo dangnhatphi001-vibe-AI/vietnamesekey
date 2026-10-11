@@ -1,3 +1,10 @@
+fcitx5-vietnamesekey (3.1.0-1) unstable; urgency=medium
+
+  * VietnameseKey V3.1: per-IC isolation, 15ms coalesced floating panel, smart Backspace/z-undo,
+    zero-alloc hot-path and CTest suite (53 tests + 20k fuzz).
+
+ -- dangnhatphi001-vibe-AI <noreply@github.com>  Thu, 27 Aug 2026 00:00:00 +0700
+
 vietnamesekey (1.0.0-1) unstable; urgency=medium
 
   * Initial release of vietnamesekey Vietnamese IME.

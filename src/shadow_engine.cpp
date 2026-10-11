@@ -1,9 +1,6 @@
 #include "shadow_engine.h"
 #include "vn_constants.h"
 
-// Standing bitmask for standalone 'w' key insertion
-static constexpr uint32_t MOD_STANDALONE_W = 1u << 9;
-
 // ──────────────────────────────────────────────────────────────────────────────
 //  Utility
 // ──────────────────────────────────────────────────────────────────────────────
@@ -18,13 +15,14 @@ ShadowEngine::ShadowEngine() { reset_state(); }
 void ShadowEngine::reset()   { reset_state(); }
 
 void ShadowEngine::reset_state() {
-    __builtin_memset(word_buffer, 0, sizeof(word_buffer));
-    __builtin_memset(char_mod, 0, sizeof(char_mod));
+    word_buffer.fill(U'\0');
+    char_mod.fill(MOD_NONE);
     buffer_length   = 0;
     current_tone    = TONE_NONE;
     last_tone_key   = U'\0';
     last_mod_target = -1;
     last_mod_key    = U'\0';
+    last_key        = U'\0';
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -55,7 +53,7 @@ bool ShadowEngine::is_word_break(char32_t keycode, uint8_t mode) {
 //  Tone-target resolution — full modern Vietnamese placement rules
 // ──────────────────────────────────────────────────────────────────────────────
 int ShadowEngine::find_tone_target() const {
-    int    vidx[32];
+    std::array<int, capacity> vidx{};
     size_t vcnt = 0;
 
     // Detect qu- / gi- glide absorption
@@ -106,7 +104,8 @@ int ShadowEngine::find_tone_target() const {
 //  Word reconstruction: word_buffer + char_mod + current_tone → UTF-32 output
 // ──────────────────────────────────────────────────────────────────────────────
 void ShadowEngine::reconstruct_word(char32_t* output_str, size_t& out_len) const {
-    const int tone_target = find_tone_target();
+    // Without a tone, scanning the whole syllable cannot change the output.
+    const int tone_target = current_tone == TONE_NONE ? -1 : find_tone_target();
     out_len = 0;
     for (size_t i = 0; i < buffer_length; ++i) {
         const char32_t c  = word_buffer[i];
@@ -140,6 +139,10 @@ bool ShadowEngine::apply_lookbehind_consonant(char32_t keycode, char32_t lower_k
         const bool is_vni_9   = (mode == 1 && keycode == U'9');
 
         if (is_telex_d || is_vni_9) {
+            if ((char_mod[0] & MOD_D) &&
+                (is_telex_d ? lower32(last_key) != U'd' : last_key != U'9')) {
+                return false;
+            }
             if (!(char_mod[0] & MOD_D)) {
                 char_mod[0] |= MOD_D;
                 last_mod_key    = is_telex_d ? U'd' : U'9';
@@ -149,7 +152,7 @@ bool ShadowEngine::apply_lookbehind_consonant(char32_t keycode, char32_t lower_k
                 char_mod[0] &= ~MOD_D;
                 last_mod_key    = U'\0';
                 last_mod_target = -1;
-                if (buffer_length < 32) word_buffer[buffer_length++] = keycode;
+                if (buffer_length < capacity) word_buffer[buffer_length++] = keycode;
             }
             return true;
         }
@@ -179,6 +182,19 @@ bool ShadowEngine::handle_telex(char32_t keycode, char32_t lower_key, bool has_v
         // If no tone but last modifier was w/aa/oo/dd, undo it like double-tap
         if (last_mod_key != U'\0' && last_mod_target >= 0 && last_mod_target < static_cast<int>(buffer_length)) {
             uint32_t m = char_mod[last_mod_target];
+            // STANDALONE_W must be tested FIRST: it is always set together with MOD_HOOK
+            // (see Priority 4 below), so testing MOD_HOOK first made this branch dead code
+            // and 'z' silently turned "ư" back into a bare "u" instead of a literal "w".
+            if (m & MOD_STANDALONE_W) {
+                bool isUpper = (word_buffer[last_mod_target] == U'U');
+                word_buffer[last_mod_target] = isUpper ? U'W' : U'w';
+                char_mod[last_mod_target] = 0u;
+                for (size_t i = 0; i < buffer_length; ++i) {
+                    const char32_t l = lower32(word_buffer[i]);
+                    if (l == U'u' || l == U'o') char_mod[i] &= ~MOD_HOOK;
+                }
+                last_mod_key = U'\0'; last_mod_target = -1; return true;
+            }
             if (m & MOD_HAT) { char_mod[last_mod_target] &= ~MOD_HAT; last_mod_key = U'\0'; last_mod_target = -1; return true; }
             if (m & MOD_BREVE) { char_mod[last_mod_target] &= ~MOD_BREVE; last_mod_key = U'\0'; last_mod_target = -1; return true; }
             if (m & MOD_HOOK) {
@@ -189,13 +205,6 @@ bool ShadowEngine::handle_telex(char32_t keycode, char32_t lower_key, bool has_v
                 last_mod_key = U'\0'; last_mod_target = -1; return true;
             }
             if (m & MOD_D) { char_mod[last_mod_target] &= ~MOD_D; last_mod_key = U'\0'; last_mod_target = -1; return true; }
-            if (m & MOD_STANDALONE_W) {
-                // standalone ư -> revert to w
-                bool isUpper = (word_buffer[last_mod_target] == U'U');
-                word_buffer[last_mod_target] = isUpper ? U'W' : U'w';
-                char_mod[last_mod_target] = 0u;
-                last_mod_key = U'\0'; last_mod_target = -1; return true;
-            }
         }
         return false; // no tone/mod to undo -> let 'z' be inserted as raw
     }
@@ -209,16 +218,40 @@ bool ShadowEngine::handle_telex(char32_t keycode, char32_t lower_key, bool has_v
     else if (lower_key == U'j') target_tone = TONE_NANG;
 
     if (target_tone != TONE_NONE && has_vowel) {
-        if (current_tone == target_tone && last_tone_key == lower_key) {
+        if (current_tone == target_tone && last_tone_key == lower_key &&
+            lower32(last_key) == lower_key) {
             // Double-key bypass: strip tone, push literal character.
+            // last_key keeps the bypass from firing when a tone key was interrupted
+            // by another key (e.g. "aasa" must stay "ấ", not collapse to "áa").
             current_tone  = TONE_NONE;
             last_tone_key = U'\0';
-            if (buffer_length < 32) word_buffer[buffer_length++] = keycode;
+            if (buffer_length < capacity) word_buffer[buffer_length++] = keycode;
         } else {
             current_tone  = target_tone;
             last_tone_key = lower_key;
         }
         return true;
+    }
+
+    // ── Horn inheritance: "uw" + "o" must yield ươ, not ưo ───────────────────
+    // The 'w' cluster rule below only fires when BOTH vowels are already buffered, so
+    // typing the horn before the 'o' ("nguwong", "tuwong", "uwoij") used to leave the
+    // 'o' bare and silently commit a wrong word. Carry the horn forward instead.
+    if (lower_key == U'o' && buffer_length > 0) {
+        const int left = static_cast<int>(buffer_length) - 1;
+        const uint32_t lm = char_mod[left];
+        if (lower32(word_buffer[left]) == U'u' &&
+            (lm & MOD_HOOK) && !(lm & MOD_STANDALONE_W)) {
+            if (buffer_length < capacity) {
+                word_buffer[buffer_length] = keycode;
+                char_mod[buffer_length]    = MOD_HOOK;
+                buffer_length++;
+                last_mod_key    = U'\0';
+                last_mod_target = -1;
+                return true;
+            }
+            return false;   // buffer full → caller commits and passes the key through
+        }
     }
 
     // ── Circumflex: aa → â  /  ee → ê  /  oo → ô ───────────────────────────
@@ -228,12 +261,13 @@ bool ShadowEngine::handle_telex(char32_t keycode, char32_t lower_key, bool has_v
 
         const int target = static_cast<int>(buffer_length) - 1;
         if ((char_mod[target] & MOD_HAT) &&
+            lower32(last_key) == lower_key &&
             last_mod_key == lower_key && last_mod_target == target) {
             // Double-key bypass.
             char_mod[target] &= ~MOD_HAT;
             last_mod_key    = U'\0';
             last_mod_target = -1;
-            if (buffer_length < 32) word_buffer[buffer_length++] = keycode;
+            if (buffer_length < capacity) word_buffer[buffer_length++] = keycode;
         } else {
             // Clear conflicting modifiers before setting HAT.
             if (lower_key == U'a') char_mod[target] &= ~MOD_BREVE;
@@ -252,11 +286,12 @@ bool ShadowEngine::handle_telex(char32_t keycode, char32_t lower_key, bool has_v
 
         const int target = static_cast<int>(buffer_length) - 1;
         if ((char_mod[target] & MOD_D) &&
+            lower32(last_key) == U'd' &&
             last_mod_key == U'd' && last_mod_target == target) {
             char_mod[target] &= ~MOD_D;
             last_mod_key    = U'\0';
             last_mod_target = -1;
-            if (buffer_length < 32) word_buffer[buffer_length++] = keycode;
+            if (buffer_length < capacity) word_buffer[buffer_length++] = keycode;
         } else {
             char_mod[target] |= MOD_D;
             last_mod_key    = U'd';
@@ -268,8 +303,9 @@ bool ShadowEngine::handle_telex(char32_t keycode, char32_t lower_key, bool has_v
     // ── Hook / Breve: w ──────────────────────────────────────────────────────
     if (lower_key == U'w') {
         // Priority 1: Double-key bypass.
-        // If the immediate previous key was 'w' that modified something, revert that modification and append 'w'.
-        if (last_mod_key == U'w' && last_mod_target >= 0) {
+        // Only when 'w' really was the immediately preceding key — otherwise a tone key
+        // in between ("uwsw") wrongly stripped the horn and injected a literal 'w'.
+        if (last_mod_key == U'w' && last_mod_target >= 0 && lower32(last_key) == U'w') {
             const char32_t target_char = lower32(word_buffer[last_mod_target]);
             if (char_mod[last_mod_target] & MOD_STANDALONE_W) {
                 if (last_mod_target == 0) {
@@ -290,7 +326,7 @@ bool ShadowEngine::handle_telex(char32_t keycode, char32_t lower_key, bool has_v
                         if (lower32(word_buffer[i]) == U'a') char_mod[i] &= ~MOD_BREVE;
                     }
                 }
-                if (buffer_length < 32) word_buffer[buffer_length++] = keycode;
+                if (buffer_length < capacity) word_buffer[buffer_length++] = keycode;
             }
             last_mod_key    = U'\0';
             last_mod_target = -1;
@@ -358,10 +394,23 @@ bool ShadowEngine::handle_telex(char32_t keycode, char32_t lower_key, bool has_v
             return true;
         }
 
+        // Priority 3.5: redundant 'w' on a uo pair whose horn is already applied.
+        // Needed because horn inheritance may have hooked the 'o' on its own, so a
+        // second 'w' in "nguwow" has nothing left to hook and must not fall through to
+        // Priority 4 (which would inject a stray standalone ư).
+        for (size_t i = 0; i + 1 < buffer_length; ++i) {
+            const char32_t a = lower32(word_buffer[i]);
+            const char32_t b = lower32(word_buffer[i + 1]);
+            if ((a == U'u' || a == U'o') && (b == U'u' || b == U'o') &&
+                (char_mod[i] & MOD_HOOK) && (char_mod[i + 1] & MOD_HOOK)) {
+                return true;   // consume, no state change
+            }
+        }
+
         // Priority 4: standalone 'w' → insert u with MOD_HOOK and MOD_STANDALONE_W (ư).
         // Only create ư if we already have a vowel in buffer (actively composing Vietnamese).
         // If buffer is empty or has no vowel, insert literal 'w' for English typing.
-        if (buffer_length < 32) {
+        if (buffer_length < capacity) {
             if (has_vowel) {
                 word_buffer[buffer_length] = (keycode == U'W') ? U'U' : U'u';
                 char_mod[buffer_length]    = MOD_HOOK | MOD_STANDALONE_W;
@@ -393,10 +442,10 @@ bool ShadowEngine::handle_vni(char32_t keycode, bool has_vowel) {
     else if (keycode == U'5') target_tone = TONE_NANG;
 
     if (target_tone != TONE_NONE && has_vowel) {
-        if (current_tone == target_tone && last_tone_key == keycode) {
+        if (current_tone == target_tone && last_tone_key == keycode && last_key == keycode) {
             current_tone  = TONE_NONE;
             last_tone_key = U'\0';
-            if (buffer_length < 32) word_buffer[buffer_length++] = keycode;
+            if (buffer_length < capacity) word_buffer[buffer_length++] = keycode;
         } else {
             current_tone  = target_tone;
             last_tone_key = keycode;
@@ -413,11 +462,12 @@ bool ShadowEngine::handle_vni(char32_t keycode, bool has_vowel) {
         }
         if (hat_target >= 0) {
             if ((char_mod[hat_target] & MOD_HAT) &&
+                last_key == U'6' &&
                 last_mod_key == U'6' && last_mod_target == hat_target) {
                 char_mod[hat_target] &= ~MOD_HAT;
                 last_mod_key    = U'\0';
                 last_mod_target = -1;
-                if (buffer_length < 32) word_buffer[buffer_length++] = keycode;
+                if (buffer_length < capacity) word_buffer[buffer_length++] = keycode;
             } else {
                 if (lower32(word_buffer[hat_target]) == U'a') char_mod[hat_target] &= ~MOD_BREVE;
                 if (lower32(word_buffer[hat_target]) == U'o') char_mod[hat_target] &= ~MOD_HOOK;
@@ -432,7 +482,7 @@ bool ShadowEngine::handle_vni(char32_t keycode, bool has_vowel) {
 
     // ── 7 → hook/horn (u/o → ư/ơ): rightmost u/o + cluster extension ────────
     if (keycode == U'7') {
-        if (last_mod_key == U'7' && last_mod_target >= 0) {
+        if (last_mod_key == U'7' && last_mod_target >= 0 && last_key == U'7') {
             const char32_t target_char = lower32(word_buffer[last_mod_target]);
             if (target_char == U'u' || target_char == U'o') {
                 for (size_t i = 0; i < buffer_length; ++i) {
@@ -441,7 +491,7 @@ bool ShadowEngine::handle_vni(char32_t keycode, bool has_vowel) {
                 }
                 last_mod_key    = U'\0';
                 last_mod_target = -1;
-                if (buffer_length < 32) word_buffer[buffer_length++] = keycode;
+                if (buffer_length < capacity) word_buffer[buffer_length++] = keycode;
                 return true;
             }
         }
@@ -492,13 +542,14 @@ bool ShadowEngine::handle_vni(char32_t keycode, bool has_vowel) {
         }
         if (breve_target >= 0) {
             if ((char_mod[breve_target] & MOD_BREVE) &&
+                last_key == U'8' &&
                 last_mod_key == U'8' && last_mod_target == breve_target) {
                 for (size_t i = 0; i < buffer_length; ++i) {
                     if (lower32(word_buffer[i]) == U'a') char_mod[i] &= ~MOD_BREVE;
                 }
                 last_mod_key    = U'\0';
                 last_mod_target = -1;
-                if (buffer_length < 32) word_buffer[buffer_length++] = keycode;
+                if (buffer_length < capacity) word_buffer[buffer_length++] = keycode;
             } else {
                 char_mod[breve_target] |= MOD_BREVE;
                 char_mod[breve_target] &= ~MOD_HAT;
@@ -518,11 +569,12 @@ bool ShadowEngine::handle_vni(char32_t keycode, bool has_vowel) {
         }
         if (d_target >= 0) {
             if ((char_mod[d_target] & MOD_D) &&
+                last_key == U'9' &&
                 last_mod_key == U'9' && last_mod_target == d_target) {
                 char_mod[d_target] &= ~MOD_D;
                 last_mod_key    = U'\0';
                 last_mod_target = -1;
-                if (buffer_length < 32) word_buffer[buffer_length++] = keycode;
+                if (buffer_length < capacity) word_buffer[buffer_length++] = keycode;
             } else {
                 char_mod[d_target] |= MOD_D;
                 last_mod_key    = U'9';
@@ -531,6 +583,22 @@ bool ShadowEngine::handle_vni(char32_t keycode, bool has_vowel) {
             return true;
         }
         return false;
+    }
+
+    // ── Horn inheritance: "u7" + "o" must yield ươ, not ưo (mirrors the Telex rule) ──
+    if ((keycode == U'o' || keycode == U'O') && buffer_length > 0) {
+        const int left = static_cast<int>(buffer_length) - 1;
+        const uint32_t lm = char_mod[left];
+        if (lower32(word_buffer[left]) == U'u' &&
+            (lm & MOD_HOOK) && !(lm & MOD_STANDALONE_W)) {
+            if (buffer_length < capacity) {
+                word_buffer[buffer_length] = keycode;
+                char_mod[buffer_length]    = MOD_HOOK;
+                buffer_length++;
+                return true;
+            }
+            return false;
+        }
     }
 
     return false;
@@ -543,7 +611,7 @@ bool ShadowEngine::process_key(char32_t keycode, uint8_t mode,
                                 char32_t* output_str, size_t& out_len) {
 
     // ── 1. Smart Backspace — Unikey style: undo tone → undo modifier → delete char ──────
-    if (__builtin_expect(keycode == 8 || keycode == 127, 0)) {
+    if (keycode == 8 || keycode == 127) [[unlikely]] {
         if (buffer_length == 0 && current_tone == TONE_NONE) {
             out_len = 0;
             return false;   // pass BackSpace through
@@ -615,12 +683,15 @@ bool ShadowEngine::process_key(char32_t keycode, uint8_t mode,
             }
         }
 
+        // A backspace mutates the buffer, so it must not count as "the same key twice"
+        // for the double-tap bypasses.
+        last_key = U'\0';
         reconstruct_word(output_str, out_len);
         return true;
     }
 
     // ── 2. Non-printable control keys → reset, do not consume ───────────────
-    if (__builtin_expect(keycode < 32, 0)) {
+    if (keycode < 32) [[unlikely]] {
         reset_state();
         out_len = 0;
         return false;
@@ -628,6 +699,15 @@ bool ShadowEngine::process_key(char32_t keycode, uint8_t mode,
 
     // ── 3. Word-break detection ──────────────────────────────────────────────
     if (is_word_break(keycode, mode)) {
+        reconstruct_word(output_str, out_len);
+        reset_state();
+        return false;
+    }
+
+    // Hand the full word back to the caller BEFORE any rule mutates it. Rule
+    // handlers can otherwise consume a key whose literal append no longer fits.
+    // At this boundary the caller commits output and forwards the incoming key.
+    if (buffer_length >= capacity) [[unlikely]] {
         reconstruct_word(output_str, out_len);
         reset_state();
         return false;
@@ -644,13 +724,6 @@ bool ShadowEngine::process_key(char32_t keycode, uint8_t mode,
             if (is_vowel(word_buffer[i])) { has_vowel = true; break; }
         }
         consumed = apply_vowel_tone(keycode, lower_key, mode, has_vowel);
-    }
-
-    // ── 6. Buffer capacity guard ─────────────────────────────────────────────
-    if (__builtin_expect(!consumed && buffer_length >= 32, 0)) {
-        reconstruct_word(output_str, out_len);
-        reset_state();
-        return false;
     }
 
     // ── 7. Issue 12 FIX: VNI modifier digits (6-9) with no eligible target ───
@@ -673,6 +746,7 @@ bool ShadowEngine::process_key(char32_t keycode, uint8_t mode,
     }
 
     // ── 9. Reconstruct and return updated composition ────────────────────────
+    last_key = keycode;
     reconstruct_word(output_str, out_len);
     return true;
 }

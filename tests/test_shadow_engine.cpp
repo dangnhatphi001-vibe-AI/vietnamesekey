@@ -38,12 +38,12 @@ static std::string to_utf8(const char32_t* s, size_t n) {
 // Type `keys` then read the pending composition.
 static std::string type_word(const std::string& keys, uint8_t mode) {
     ShadowEngine e;
-    char32_t out[32];
+    char32_t out[ShadowEngine::capacity];
     size_t len = 0;
     for (char c : keys) {
         e.process_key(static_cast<char32_t>(static_cast<unsigned char>(c)), mode, out, len);
     }
-    char32_t comp[32];
+    char32_t comp[ShadowEngine::capacity];
     size_t clen = 0;
     e.get_composition(comp, clen);
     return to_utf8(comp, clen);
@@ -66,7 +66,7 @@ static void expect_eq(const std::string& keys, uint8_t mode,
 static std::string type_then_backspace(const std::string& keys, int bs,
                                        uint8_t mode) {
     ShadowEngine e;
-    char32_t out[32];
+    char32_t out[ShadowEngine::capacity];
     size_t len = 0;
     for (char c : keys) {
         e.process_key(static_cast<char32_t>(static_cast<unsigned char>(c)), mode, out, len);
@@ -78,6 +78,33 @@ static std::string type_then_backspace(const std::string& keys, int bs,
 }
 
 int main() {
+    // A delayed d can set the initial stroke, but only an adjacent repeat undoes it.
+    expect_eq("ddad", 0, "đad");
+    expect_eq("d9a9", 1, "đa");
+
+    // Full-buffer rule keys must return the complete pending word and pass through,
+    // rather than reporting success while silently dropping the new character.
+    for (const auto& keys : {std::string(32, 'b') + "w",
+                             std::string(31, 'b') + "ass",
+                             std::string(31, 'b') + "aaa",
+                             std::string(31, 'b') + "a11",
+                             std::string(31, 'b') + "a66"}) {
+        const uint8_t mode = keys.back() >= '0' && keys.back() <= '9' ? 1 : 0;
+        ShadowEngine e;
+        char32_t out[ShadowEngine::capacity];
+        size_t len = 0;
+        for (size_t i = 0; i < 32; ++i) e.process_key(keys[i], mode, out, len);
+        const std::string pending = to_utf8(out, len);
+        const bool consumed = e.process_key(keys[32], mode, out, len);
+        if (!consumed && len == 32 && to_utf8(out, len) == pending && !e.has_composition()) {
+            ++g_pass;
+        } else {
+            ++g_fail;
+            std::printf("FAIL capacity handoff mode=%u key=%c len=%zu consumed=%d\n",
+                        mode, keys[32], len, consumed);
+        }
+    }
+
     // ── Telex: vowels & modifiers ────────────────────────────────────────────
     expect_eq("a", 0, "a");
     expect_eq("aw", 0, "\xC4\x83");                 // ă
@@ -91,6 +118,40 @@ int main() {
     expect_eq("ddi", 0, "\xC4\x91" "i");            // đi
     expect_eq("DDi", 0, "\xC4\x90" "i");            // Đi
 
+    // --- Telex: uo cluster -- the horn must be inherited by a following 'o' ---
+    // Only "uow" (w after BOTH vowels) used to work. Typing the horn before the
+    // o left it bare and silently committed a wrong word. Both orders must now
+    // produce the same result, and a redundant 2nd 'w' must be a no-op.
+    expect_eq("uwo",      0, "\xC6\xB0\xC6\xA1");                  // horn inherited by following o
+    expect_eq("nguwong",  0, "\x6E\x67\xC6\xB0\xC6\xA1\x6E\x67");  // ng u-horn o-horn ng
+    expect_eq("tuwong",   0, "\x74\xC6\xB0\xC6\xA1\x6E\x67");      // t + horn + o-horn + ng
+    expect_eq("thuwong",  0, "\x74\x68\xC6\xB0\xC6\xA1\x6E\x67");  // th + horn + o-horn + ng
+    expect_eq("uwois",    0, "\xC6\xB0\xE1\xBB\x9B\x69");          // u-o-i, horn on both, sac
+    expect_eq("uwoij",    0, "\xC6\xB0\xE1\xBB\xA3\x69");          // u-o-i, horn on both, nang
+    expect_eq("dduwowjc", 0, "\xC4\x91\xC6\xB0\xE1\xBB\xA3\x63");  // dd + uo + w + j + c
+    expect_eq("uow",      0, "\xC6\xB0\xC6\xA1");                  // uow (w after both) still works
+    expect_eq("nguowng",  0, "\x6E\x67\xC6\xB0\xC6\xA1\x6E\x67");  // ng + uo + w + ng
+    expect_eq("duwowng",  0, "\x64\xC6\xB0\xC6\xA1\x6E\x67");      // d + uo + w + ng
+    expect_eq("nguwowif", 0, "\x6E\x67\xC6\xB0\xE1\xBB\x9D\x69");  // redundant 2nd w is a no-op
+    expect_eq("muowis",   0, "\x6D\xC6\xB0\xE1\xBB\x9B\x69");      // w after o
+
+    // --- Double-tap bypass must require the SAME key twice in a row ---------
+    // last_mod_key / last_tone_key deliberately survive tone keys (so 'z' can still
+    // undo a modifier applied before the tone) -- hence the separate last_key gate.
+    expect_eq("aasa",     0, "\xE1\xBA\xA5");                      // circumflex+tone, bypass must NOT fire
+    expect_eq("ees",      0, "\xE1\xBA\xBF");                      // circumflex+tone
+    expect_eq("aas",      0, "\xE1\xBA\xA5");                      // circumflex+tone
+    expect_eq("oosa",     0, "\xC3\xB4\xC3\xA1");                  // oa cluster: tone lands on a
+
+    // --- z-undo of a standalone u-horn must restore the literal 'w' ----------
+    // The MOD_STANDALONE_W branch was unreachable (MOD_HOOK was tested first),
+    // so 'z' left a bare 'u' where it should have restored the 'w'.
+    expect_eq("iwz",      0, "\x69\x77");                          // z restores the literal w
+    expect_eq("awiwz",    0, "\xC4\x83\x69\x77");                  // z restores the literal w
+
+    // --- Telex: 'o'+'a' cluster keeps the breve on 'a' ---------------------
+    expect_eq("hoawc",    0, "\x68\x6F\xC4\x83\x63");              // breve on a, not horn on o
+    expect_eq("hoaw",     0, "\x68\x6F\xC4\x83");                  // breve on a
     // ── Telex: tones ─────────────────────────────────────────────────────────
     expect_eq("as", 0, "\xC3\xA1");                 // á
     expect_eq("af", 0, "\xC3\xA0");                 // à
@@ -138,13 +199,30 @@ int main() {
     expect_eq("o7", 1, "\xC6\xA1");                 // ơ
     expect_eq("u7", 1, "\xC6\xB0");                 // ư
     expect_eq("d9", 1, "\xC4\x91");                 // đ
-    expect_eq("a11", 1, "a1");                      // double-tap bypass
-
+    // VNI: same horn-inheritance + double-tap gating as Telex
+    expect_eq("a11",      1, "\x61\x31");                          // double-tap bypass
+    expect_eq("a61",      1, "\xE1\xBA\xA5");                      // a + 6 + 1
+    expect_eq("u7o",      1, "\xC6\xB0\xC6\xA1");                  // horn inherited by following o
+    expect_eq("uo7",      1, "\xC6\xB0\xC6\xA1");                  // 7 after both vowels
+    expect_eq("u7o1",     1, "\xC6\xB0\xE1\xBB\x9B");              // 7 then o then 1
+    expect_eq("ngu7ong",  1, "\x6E\x67\xC6\xB0\xC6\xA1\x6E\x67");  // nguong
+    expect_eq("tu7ong",   1, "\x74\xC6\xB0\xC6\xA1\x6E\x67");      // tuong
+    // adjacent 6 still bypasses, but a tone key in between must block it
+    expect_eq("a66",   1, "a6");                  // adjacent double-tap
+    expect_eq("a616",  1, "\xE1\xBA\xA5");      // circumflex survives the tone
+    expect_eq("a611",  1, "\xC3\xA2" "1");      // tone double-tap still works
+    expect_eq("a818",  1, "\xE1\xBA\xAF");      // breve survives the tone
+    expect_eq("a81a8", 1, "\xE1\xBA\xAF\xC4\x83");
     // ── Lookup table guards ──────────────────────────────────────────────────
     if (lookup_vietnamese_char(U'a', TONE_SAC | TONE_HUYEN, MOD_NONE) == U'a') ++g_pass;
     else { ++g_fail; std::printf("FAIL lookup multi-tone guard\n"); }
     if (lookup_vietnamese_char(U'o', TONE_SAC, MOD_HAT | MOD_BREVE) == U'\x00F3') ++g_pass;
     else { ++g_fail; std::printf("FAIL lookup multi-mod guard\n"); }
+    // y+horn must resolve to real characters, not a silent fallback to a bare 'y'
+    if (lookup_vietnamese_char(U'y', TONE_HUYEN, MOD_HOOK) == U'\x1EF3') ++g_pass;
+    else { ++g_fail; std::printf("FAIL lookup y+hook\n"); }
+    if (lookup_vietnamese_char(U'Y', TONE_NANG,  MOD_HOOK) == U'\x1EF4') ++g_pass;
+    else { ++g_fail; std::printf("FAIL lookup Y+hook\n"); }
 
     // ── Word-break sanity ────────────────────────────────────────────────────
     if (ShadowEngine::is_word_break(U' ', 0)) ++g_pass; else { ++g_fail; std::printf("FAIL break space\n"); }

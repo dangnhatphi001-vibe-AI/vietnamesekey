@@ -32,6 +32,7 @@ MAINTAINER="${MAINTAINER:-dangnhatphi001-vibe-AI <noreply@github.com>}"
 
 cmake -S . -B "${BUILD_DIR}" \
     -DCMAKE_BUILD_TYPE="${BUILD_TYPE}" \
+    -DCMAKE_CXX_STANDARD=26 \
     -DCMAKE_INSTALL_PREFIX=/usr \
     -DVKEY_MARCH_NATIVE=OFF
 
@@ -43,7 +44,7 @@ DESTDIR="${PACKAGE_ROOT}" cmake --install "${BUILD_DIR}"
 test -f "${PACKAGE_ROOT}/usr/lib/x86_64-linux-gnu/fcitx5/vietnamesekey.so"
 test -f "${PACKAGE_ROOT}/usr/share/fcitx5/addon/vietnamesekey.conf"
 test -f "${PACKAGE_ROOT}/usr/share/fcitx5/inputmethod/vietnamesekey-telex.conf"
-test -f "${PACKAGE_ROOT}/usr/share/fcitx5/inputmethod/vietnamesekey-vni.conf"
+test -f "${PACKAGE_ROOT}/usr/share/fcitx5/inputmethod/vietnamesekey-raw.conf"
 
 find "${PACKAGE_ROOT}/usr/share" -type f -exec chmod 0644 {} +
 find "${PACKAGE_ROOT}/usr/lib/x86_64-linux-gnu/fcitx5" -type f -name '*.so' -exec chmod 0644 {} +
@@ -63,7 +64,7 @@ Installed-Size: ${installed_size}
 Homepage: ${HOMEPAGE}
 Description: Optimized Vietnamese input method engine for Fcitx5
  VietnameseKey is a low-latency Vietnamese IME addon for Fcitx5.
- It provides Telex and VNI input methods with stable composition
+ It provides Telex and Raw input methods with stable composition
  behavior for native Linux, Wayland, XWayland, Electron, and Flatpak
  application workflows.
 EOF

@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <array>
 #include "vn_constants.h"
 
 // ShadowEngine: ultra-low-latency, zero-dynamic-allocation Vietnamese composition engine.
@@ -19,6 +20,7 @@
 //   • ướm   (w-o-w-m-j): ư and ơ both have MOD_HOOK, tone on ơ
 class ShadowEngine {
 public:
+    static constexpr size_t capacity = 32;
     ShadowEngine();
 
     // Check if the keycode acts as a word-breaker under the current mode
@@ -42,8 +44,8 @@ public:
 
 private:
     // ── Hot-path state ──────────────────────────────────────────────────────
-    char32_t word_buffer[32];  // raw key characters in composition order (case preserved)
-    uint32_t char_mod[32];     // per-character modifier bitmask (MOD_HAT | MOD_HOOK | …)
+    std::array<char32_t, capacity> word_buffer{}; // raw characters, case preserved
+    std::array<uint32_t, capacity> char_mod{};    // modifier bits per character
     size_t   buffer_length;    // number of active entries in word_buffer / char_mod
 
     uint32_t current_tone;     // TONE_* bitmask for the whole syllable (one tone per word)
@@ -51,6 +53,11 @@ private:
 
     int      last_mod_target;  // buffer index last modified by a modifier key (-1 = none)
     char32_t last_mod_key;     // lowercase modifier key that set last_mod_target
+    char32_t last_key;         // raw key that ended the previous process_key() call.
+                               // Gates every double-tap bypass: the bypass must fire only when
+                               // the SAME key was pressed twice in a row. Tone keys deliberately
+                               // leave last_mod_key/last_tone_key intact (so 'z' can still undo a
+                               // modifier applied before the tone), hence this separate field.
 
     // ── Private helpers ─────────────────────────────────────────────────────
     void reset_state();

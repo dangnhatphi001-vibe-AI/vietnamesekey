@@ -1,221 +1,139 @@
 # VietnameseKey
 
-VietnameseKey is a low-latency Vietnamese Input Method Engine for Linux. It is implemented as a native Fcitx5 addon in C++20 and provides Telex and VNI input methods.
+Bộ gõ tiếng Việt cho **Fcitx5 trên Linux**, viết bằng **C++26**. Phiên bản hiện tại: **3.1.0**.
 
-The v3.0 line focuses on stable composition on Wayland, XWayland, Electron, Flatpak, AppImage, Wine, and other non-native application stacks. The Fcitx5 boundary keeps per-InputContext state, coalesces floating-panel updates (15ms) and keeps non-native clients on a floating composition panel path, avoiding fragile live text replacement and `nnhnha` duplication.
+VietnameseKey cung cấp **Telex** để gõ tiếng Việt và **Raw** để chuyển tiếp phím nguyên bản khi chơi game hoặc dùng phím tắt. Engine giữ trạng thái riêng cho từng ô nhập, hiển thị preedit trong ứng dụng khi client hỗ trợ và dùng bảng nổi trong các trường hợp fallback.
 
-## Features
+## Tính năng
 
-- Native Fcitx5 addon.
-- Telex and VNI input methods.
-- C++20 core with fixed-size composition buffers.
-- Per-character modifier state for Vietnamese vowel/consonant transforms.
-- Per-InputContext state and FIFO key-event serialization at the Fcitx5 integration layer.
-- Inline preedit for clients that support it.
-- Floating panel composition (15ms coalesced) for no-preedit/non-native clients.
-- Word-level commit on space, punctuation, Enter, focus switch, or explicit flush.
-- Smart Backspace (undo tone → undo modifier → delete) and `z` undo.
-- No `deleteSurroundingText` replacement path.
-- No synthetic Backspace live replacement path.
+- Telex: `aa`, `aw`, `ee`, `oo`, `ow`, `uw`, `dd`; dấu `s`, `f`, `r`, `x`, `j`; `z` hoàn tác biến đổi.
+- Ví dụ: `tieengs` → **tiếng**.
+- Backspace thông minh: bỏ dấu thanh, bỏ biến đổi chữ, rồi xóa ký tự.
+- Commit khi nhập khoảng trắng, dấu câu, Enter hoặc chuyển ngữ cảnh.
+- Bộ đệm cố định 32 ký tự; khi đầy, commit phần đang soạn và chuyển tiếp phím mới, tránh mất phím.
+- Raw không xử lý Telex và không giữ phím của ứng dụng.
 
-## Packages
+VNI vẫn có trong lõi và kiểm thử, nhưng không được đăng ký thành phương thức nhập trong bản này. Khả năng hiển thị phụ thuộc giao thức nhập và tích hợp Fcitx của từng ứng dụng; chưa có cam kết tương thích với mọi ứng dụng Electron, Wine hoặc Flatpak.
 
-Release builds provide two Debian packages:
+## Yêu cầu
 
-```text
-fcitx5-vietnamesekey_amd64.deb
-fcitx5-vietnamesekey-full_amd64.deb
-```
+| Thành phần | Yêu cầu |
+| --- | --- |
+| Compiler | GCC 15 trở lên, hỗ trợ chế độ `-std=c++26` |
+| CMake | 3.30 trở lên |
+| Input framework | Fcitx5 và thư viện phát triển Core/Utils |
+| Hệ điều hành | Linux |
 
-Use `fcitx5-vietnamesekey_amd64.deb` if Fcitx5 is already configured and you only want the addon.
+Đã build và kiểm thử trên Ubuntu 26.04.1, GCC 15.2, CMake 4.2.3 và Fcitx5 5.1.19. Hỗ trợ C++26 của compiler vẫn có thể chưa đầy đủ; dự án yêu cầu chế độ C++26 và không tự hạ xuống C++20/23.
 
-Use `fcitx5-vietnamesekey-full_amd64.deb` if you want a ready-to-use install that also pulls Fcitx5 runtime dependencies and installs system defaults.
+## Build và cài từ mã nguồn
 
-The full package installs:
-
-```text
-/usr/lib/x86_64-linux-gnu/fcitx5/vietnamesekey.so
-/usr/share/fcitx5/addon/vietnamesekey.conf
-/usr/share/fcitx5/inputmethod/vietnamesekey-telex.conf
-/usr/share/fcitx5/inputmethod/vietnamesekey-vni.conf
-/etc/environment.d/80-fcitx5-vietnamesekey.conf
-/etc/xdg/fcitx5/profile
-/etc/xdg/fcitx5/config
-/usr/bin/fcitx5-vietnamesekey-setup
-```
-
-Default full-package profile:
-
-```text
-DefaultIM=vietnamesekey-telex
-Default Layout=us
-Layout=us
-```
-
-In Fcitx/XKB, standard US keyboard layout is `us`.
-
-## Install From Release
-
-Download one of the `.deb` files from the GitHub Release page.
-
-Addon-only package:
-
-```bash
-sudo apt install ./fcitx5-vietnamesekey_amd64.deb
-fcitx5 -r -d
-fcitx5-remote -m vietnamesekey-telex
-```
-
-Full package:
-
-```bash
-sudo apt install ./fcitx5-vietnamesekey-full_amd64.deb
-```
-
-For a new user session, log out and log in again so desktop applications inherit the Fcitx5 environment.
-
-For an existing user profile, run:
-
-```bash
-fcitx5-vietnamesekey-setup
-fcitx5 -r -d
-```
-
-`fcitx5-vietnamesekey-setup` writes user-level Fcitx5 defaults and creates timestamped backups before replacing existing user config files.
-
-## Build From Source
-
-### Ubuntu/Debian
+Ví dụ trên Ubuntu 26.04:
 
 ```bash
 sudo apt update
-sudo apt install -y --no-install-recommends \
-  build-essential \
-  cmake \
-  extra-cmake-modules \
-  fcitx5 \
-  libfcitx5core-dev \
-  libfcitx5utils-dev
-```
+sudo apt install git g++-15 cmake fcitx5 fcitx5-config-qt \
+  libfcitx5core-dev libfcitx5utils-dev
 
-Build and install:
-
-```bash
 git clone https://github.com/dangnhatphi001-vibe-AI/vietnamesekey.git
 cd vietnamesekey
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr
-cmake --build build --parallel "$(nproc)"
-sudo cmake --install build
+CXX=g++-15 cmake -S . -B build-cxx26 \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_CXX_STANDARD=26 \
+  -DCMAKE_INSTALL_PREFIX=/usr \
+  -DVKEY_MARCH_NATIVE=OFF
+cmake --build build-cxx26 --parallel "$(nproc)"
+ctest --test-dir build-cxx26 --output-on-failure
+sudo cmake --install build-cxx26
 fcitx5 -r -d
 ```
 
-Portable build without CPU-specific `-march=native`:
+Mở **Fcitx5 Configuration**, thêm phương thức theo thứ tự:
+
+1. Keyboard — English (US), hoặc bàn phím nền đang dùng.
+2. VietnameseKey — Telex.
+3. VietnameseKey — Raw.
+
+Bỏ chọn bộ lọc “Only Show Current Language” nếu không thấy VietnameseKey. Sau khi Fcitx khởi động xong, chọn Telex:
 
 ```bash
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr -DVKEY_MARCH_NATIVE=OFF
-cmake --build build --parallel "$(nproc)"
-```
-
-### Arch Linux
-
-```bash
-sudo pacman -S --needed base-devel cmake extra-cmake-modules fcitx5
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr
-cmake --build build --parallel "$(nproc)"
-sudo cmake --install build
-fcitx5 -r -d
-```
-
-## Build Debian Packages Locally
-
-Addon-only package:
-
-```bash
-scripts/build-deb-local.sh 3.0.0
-```
-
-Full package:
-
-```bash
-scripts/build-full-deb-local.sh 3.0.0
-```
-
-Output files:
-
-```text
-fcitx5-vietnamesekey_amd64.deb
-fcitx5-vietnamesekey-full_amd64.deb
-```
-
-## GitHub Release Automation
-
-The release workflow is defined at:
-
-```text
-.github/workflows/build-deb.yml
-```
-
-It runs when a tag matching `v*` or `V*` is pushed.
-
-Example:
-
-```bash
-git tag -a v3.0.0 -m "VietnameseKey v3.0.0"
-git push origin main
-git push origin v3.0.0
-```
-
-The workflow builds and uploads:
-
-```text
-fcitx5-vietnamesekey_amd64.deb
-fcitx5-vietnamesekey-full_amd64.deb
-```
-
-## Wayland And Non-Native Apps
-
-Some applications do not implement preedit correctly, especially Electron, XWayland, Flatpak, AppImage, Wine, and unofficial chat clients. VietnameseKey handles this by keeping the active composition in the Fcitx5 floating panel until the word is finalized.
-
-Composition strategy:
-
-- Native preedit-capable clients receive inline preedit.
-- No-preedit/non-native clients use the floating panel.
-- Final text is committed once per word boundary.
-- Space and punctuation are bundled with the composed word in one commit.
-- Reset spam from broken clients does not flush the composition mid-word.
-
-This avoids the common race where raw characters and committed Vietnamese text arrive out of order.
-
-## Input Methods
-
-Registered Fcitx5 input methods:
-
-```text
-vietnamesekey-telex
-vietnamesekey-vni
-```
-
-Switch manually:
-
-```bash
-fcitx5-remote -m vietnamesekey-telex
-fcitx5-remote -m vietnamesekey-vni
-```
-
-Check current input method:
-
-```bash
+fcitx5-remote -o
+fcitx5-remote -s vietnamesekey-telex
 fcitx5-remote -n
 ```
 
-## Development Notes
+Chuyển sang Raw bằng `fcitx5-remote -s vietnamesekey-raw`. Có thể chọn cả hai phương thức từ menu Fcitx hoặc phím chuyển phương thức đã cấu hình.
 
-- `ShadowEngine` is the composition engine.
-- `src/vietnamesekey_fcitx.cpp` is the Fcitx5 integration layer.
-- `CMakeLists.txt` defaults to `VKEY_MARCH_NATIVE=ON` for local performance builds.
-- CI and package builds use `VKEY_MARCH_NATIVE=OFF` for portable `amd64` binaries.
-- Build artifacts and local Debian staging roots are ignored by git.
+### Build nhanh cho máy phát triển
 
-## License
+```bash
+CXX=g++-15 ./build_and_reload.sh
+```
 
-This project is licensed under the MIT License. See [LICENSE](LICENSE).
+Script build, chạy kiểm thử, sao lưu addon và metadata hiện có, cài đặt rồi khởi động lại Fcitx và chọn Telex. Backup nằm dưới `${XDG_STATE_HOME:-~/.local/state}/vietnamesekey/backups/`.
+
+Script bật `-march=native` để tối ưu cho CPU của máy build. Khi tạo binary để phân phối, dùng cấu hình `VKEY_MARCH_NATIVE=OFF` như ví dụ ở trên.
+
+## Gói Debian
+
+Xem các bản đã công bố tại [GitHub Releases](https://github.com/dangnhatphi001-vibe-AI/vietnamesekey/releases). Mã nguồn trên `main` có thể mới hơn bản phát hành.
+
+Có hai loại gói:
+
+| Gói | Nội dung |
+| --- | --- |
+| `fcitx5-vietnamesekey` | Addon, metadata và icon; dùng với cấu hình Fcitx hiện có |
+| `fcitx5-vietnamesekey-full` | Addon, dependencies Fcitx, cấu hình mặc định và lệnh setup |
+
+Build gói tại máy có toolchain phù hợp:
+
+```bash
+CXX=g++-15 ./scripts/build-deb-local.sh 3.1.0
+CXX=g++-15 ./scripts/build-full-deb-local.sh 3.1.0
+```
+
+Cài **một** trong hai gói bằng `sudo apt install ./<ten-goi>.deb`. Với gói full, chạy `fcitx5-vietnamesekey-setup` bằng tài khoản người dùng. Lệnh này sao lưu rồi **thay thế profile, config và biến môi trường Fcitx của người dùng** bằng cấu hình có Keyboard US, Telex và Raw. Đăng xuất và đăng nhập lại để các ứng dụng nhận biến môi trường mới.
+
+Workflow GitHub Actions đóng gói Debian và tạo release khi push tag bắt đầu bằng `v` hoặc `V`; một lần push vào `main` không tạo release.
+
+## Kiểm thử và benchmark
+
+```bash
+ctest --test-dir build-cxx26 --output-on-failure
+./build-cxx26/vkey_test
+./build-cxx26/vkey_bench
+```
+
+Hai nhóm CTest kiểm tra:
+
+- **ShadowEngine:** 93 kiểm tra thành công trong lần xác minh bản 3.1.0, gồm fuzz 20.000 chuỗi; xử lý dấu, Backspace và biên bộ đệm.
+- **Fcitx boundary:** timer xóa preedit, hủy timer khi có nội dung mới, chuyển Raw và hủy input context, chạy với Fcitx headless.
+
+Release và Debug với ASan/UBSan đã chạy thành công. Benchmark đo riêng `process_key` và `get_composition`; số đo phụ thuộc CPU, cờ build và dữ liệu đầu vào, không đại diện cho độ trễ toàn bộ ứng dụng. Việc chuyển chuẩn C++ tự nó không chứng minh tốc độ tăng.
+
+### Tùy chọn CMake
+
+| Tùy chọn | Mặc định | Ý nghĩa |
+| --- | --- | --- |
+| `VKEY_BUILD_TESTS` | `ON` | Build core tests, Fcitx boundary tests và benchmark |
+| `VKEY_MARCH_NATIVE` | `OFF` | Tối ưu theo CPU máy build khi bật |
+| `VKEY_ENABLE_IPO` | `ON` | Bật IPO cho addon ở Release khi toolchain hỗ trợ |
+
+## Chẩn đoán
+
+Nếu chưa gõ được, kiểm tra phương thức hiện tại bằng `fcitx5-remote -n` và trạng thái bằng `fcitx5-remote`: `2` là đang hoạt động. Đảm bảo Telex đã được thêm vào nhóm nhập cùng bàn phím nền.
+
+Nếu chỉ một ứng dụng không nhận bộ gõ, chạy `fcitx5-diagnose` và kiểm tra tích hợp input method của ứng dụng đó. Sau khi sửa biến môi trường, cần khởi động lại ứng dụng hoặc đăng nhập lại. Bảng nổi có thể là fallback của client, không phải dấu hiệu engine bị lag.
+
+## Tài liệu và hướng nâng cấp
+
+- [Ghi chú phiên bản 3.1.0](RELEASE_NOTES_V3.1.0.md).
+- [Chuyển sang C++26 và xác minh cài đặt](docs/CXX26_MIGRATION.md).
+- [Báo cáo hiệu năng và đề xuất cải thiện](docs/PERFORMANCE_AUDIT.md).
+- [System Design (.docx)](docs/VietnameseKey_System_Design.docx): tài liệu giai đoạn audit C++20/C++23 trước khi chuyển sang C++26.
+
+Các bước cải thiện tiếp theo: mở rộng kiểm thử trên ứng dụng thực tế và Wayland/X11, đo độ trễ đầu cuối, bổ sung cấu hình hành vi Backspace/preedit và tiếp tục kiểm tra vòng đời input context.
+
+## Giấy phép
+
+[MIT](LICENSE).

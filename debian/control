@@ -1,20 +1,21 @@
-Source: vietnamesekey
+Source: fcitx5-vietnamesekey
 Section: utils
 Priority: optional
-Maintainer: Your Name <youremail@example.com>
+Maintainer: dangnhatphi001-vibe-AI <noreply@github.com>
 Build-Depends: debhelper-compat (= 13),
-               cmake,
+               cmake (>= 3.30),
+               g++-15,
                g++,
                extra-cmake-modules,
                libfcitx5core-dev,
                libfcitx5utils-dev
-Standards-Version: 4.5.1
-Homepage: https://github.com/yourusername/vietnamesekey
+Standards-Version: 4.6.2
+Homepage: https://github.com/dangnhatphi001-vibe-AI/vietnamesekey
 
-Package: vietnamesekey
+Package: fcitx5-vietnamesekey
 Architecture: any
 Depends: ${shlibs:Depends}, ${misc:Depends}, fcitx5
-Description: Ultra-optimized allocation-minimized C++20 Vietnamese IME for Fcitx5
- An ultra-optimized, allocation-minimized C++20 Vietnamese Input Method
+Description: Ultra-optimized C++26 Vietnamese IME for Fcitx5 — Telex/Raw, Wayland/XWayland/Electron/Wine
+ An ultra-optimized, allocation-minimized C++26 Vietnamese Input Method
  Engine (IME) addon for the Fcitx5 framework on Linux. Designed for users
- who demand low input latency and stable composition behavior.
+ who demand low input latency and stable floating-panel composition.

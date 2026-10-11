@@ -2,6 +2,7 @@
 #define VN_CONSTANTS_H
 
 #include <cstdint>
+#include <bit>
 
 // Tone Masks
 constexpr uint32_t TONE_NONE  = 0;
@@ -17,6 +18,8 @@ constexpr uint32_t MOD_HAT   = 1 << 5; // Mũ Â/Ê/Ô (circumflex)
 constexpr uint32_t MOD_HOOK  = 1 << 6; // Móc Ư/Ơ (horn)
 constexpr uint32_t MOD_BREVE = 1 << 7; // Trăng Ă (breve)
 constexpr uint32_t MOD_D     = 1 << 8; // Đ (d slash)
+constexpr uint32_t MOD_STANDALONE_W = 1u << 9; // Standalone 'w' → ư inserted as U+01B0
+static_assert((MOD_STANDALONE_W & (MOD_HAT|MOD_HOOK|MOD_BREVE|MOD_D))==0, "MOD_STANDALONE_W must not overlap");
 
 // Compile-time lookup: base vowel/consonant + ToneMask + ModifierMask → UTF-32 codepoint.
 // Unknown combinations (invalid tone values, impossible modifier+base pairings) return base_char.
@@ -67,7 +70,7 @@ constexpr char32_t VN_CHAR_TABLE[14][5][6] = {
     {
         { U'y', U'\x00FD', U'\x1EF3', U'\x1EF7', U'\x1EF9', U'\x1EF5' }, // MOD_NONE
         { U'y', U'y', U'y', U'y', U'y', U'y' }, // MOD_HAT
-        { U'y', U'y', U'y', U'y', U'y', U'y' }, // MOD_HOOK
+        { U'\x1EF7', U'\x1EF9', U'\x1EF3', U'\x1EF7', U'\x1EF9', U'\x1EF5' }, // MOD_HOOK (ỷ/ỹ/ỳ/ỵ)
         { U'y', U'y', U'y', U'y', U'y', U'y' }, // MOD_BREVE
         { U'y', U'y', U'y', U'y', U'y', U'y' }, // MOD_D
     },
@@ -123,7 +126,7 @@ constexpr char32_t VN_CHAR_TABLE[14][5][6] = {
     {
         { U'Y', U'\x00DD', U'\x1EF2', U'\x1EF6', U'\x1EF8', U'\x1EF4' }, // MOD_NONE
         { U'Y', U'Y', U'Y', U'Y', U'Y', U'Y' }, // MOD_HAT
-        { U'Y', U'Y', U'Y', U'Y', U'Y', U'Y' }, // MOD_HOOK
+        { U'\x1EF6', U'\x1EF8', U'\x1EF2', U'\x1EF6', U'\x1EF8', U'\x1EF4' }, // MOD_HOOK (Ỷ/Ỹ/Ỳ/Ỵ)
         { U'Y', U'Y', U'Y', U'Y', U'Y', U'Y' }, // MOD_BREVE
         { U'Y', U'Y', U'Y', U'Y', U'Y', U'Y' }, // MOD_D
     },
@@ -162,32 +165,27 @@ constexpr char32_t lookup_vietnamese_char(char32_t base_char, uint32_t tone, uin
     int tone_idx = 0;
     if (tone) {
         // Guard against corrupted multi-bit tone (must be power of two)
-        if ((tone & (tone - 1)) != 0) {
+        if (!std::has_single_bit(tone)) {
             tone_idx = 0;
         } else {
-            tone_idx = __builtin_ctz(tone) + 1; // TONE_SAC=1(bit 0), so ctz=0 -> idx=1
+            tone_idx = std::countr_zero(tone) + 1; // TONE_SAC bit 0 -> index 1
             if (tone_idx > 5) tone_idx = 0; // fallback
         }
     }
 
     int mod_idx = 0;
     if (mod) {
-        if ((mod & (mod - 1)) != 0) {
+        if (!std::has_single_bit(mod)) {
             // Multiple modifier bits — invalid, fallback to NONE (table holds base_char)
             mod_idx = 0;
         } else {
-            mod_idx = __builtin_ctz(mod) - 4; // MOD_HAT=1<<5 -> ctz=5 -> idx=1
+            mod_idx = std::countr_zero(mod) - 4; // MOD_HAT bit 5 -> index 1
             if (mod_idx < 0 || mod_idx > 4) mod_idx = 0; // fallback
         }
     }
 
     char32_t result = VN_CHAR_TABLE[base_idx][mod_idx][tone_idx];
-    if (result == U'a' || result == U'A') {
-        // Just checking if we got the fallback dummy for invalid combos, actually the generator put base_char for invalid combos
-        // so it's already correct.
-    }
-    
-    // In our table, invalid combos just hold the base_char, so returning it is safe.
+    // Invalid combos in the table already hold base_char, so returning it is safe.
     return result;
 }
 

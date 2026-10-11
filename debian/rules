@@ -3,4 +3,4 @@
 	dh $@
 
 override_dh_auto_configure:
-	dh_auto_configure -- -DVKEY_MARCH_NATIVE=OFF
+	CXX=g++-15 dh_auto_configure -- -DCMAKE_CXX_STANDARD=26 -DVKEY_MARCH_NATIVE=OFF

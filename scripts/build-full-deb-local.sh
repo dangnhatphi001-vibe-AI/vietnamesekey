@@ -32,6 +32,7 @@ MAINTAINER="${MAINTAINER:-dangnhatphi001-vibe-AI <noreply@github.com>}"
 
 cmake -S . -B "${BUILD_DIR}" \
     -DCMAKE_BUILD_TYPE="${BUILD_TYPE}" \
+    -DCMAKE_CXX_STANDARD=26 \
     -DCMAKE_INSTALL_PREFIX=/usr \
     -DVKEY_MARCH_NATIVE=OFF
 
@@ -43,7 +44,7 @@ DESTDIR="${PACKAGE_ROOT}" cmake --install "${BUILD_DIR}"
 test -f "${PACKAGE_ROOT}/usr/lib/x86_64-linux-gnu/fcitx5/vietnamesekey.so"
 test -f "${PACKAGE_ROOT}/usr/share/fcitx5/addon/vietnamesekey.conf"
 test -f "${PACKAGE_ROOT}/usr/share/fcitx5/inputmethod/vietnamesekey-telex.conf"
-test -f "${PACKAGE_ROOT}/usr/share/fcitx5/inputmethod/vietnamesekey-vni.conf"
+test -f "${PACKAGE_ROOT}/usr/share/fcitx5/inputmethod/vietnamesekey-raw.conf"
 
 find "${PACKAGE_ROOT}/usr/share" -type f -exec chmod 0644 {} +
 find "${PACKAGE_ROOT}/usr/lib/x86_64-linux-gnu/fcitx5" -type f -name '*.so' -exec chmod 0644 {} +
@@ -74,8 +75,16 @@ DefaultIM=vietnamesekey-telex
 
 [Groups/0/Items/0]
 # Name
-Name=vietnamesekey-telex
+Name=keyboard-us
 # Layout
+Layout=us
+
+[Groups/0/Items/1]
+Name=vietnamesekey-telex
+Layout=us
+
+[Groups/0/Items/2]
+Name=vietnamesekey-raw
 Layout=us
 
 [GroupOrder]
@@ -127,7 +136,15 @@ Default Layout=us
 DefaultIM=vietnamesekey-telex
 
 [Groups/0/Items/0]
+Name=keyboard-us
+Layout=us
+
+[Groups/0/Items/1]
 Name=vietnamesekey-telex
+Layout=us
+
+[Groups/0/Items/2]
+Name=vietnamesekey-raw
 Layout=us
 
 [GroupOrder]
@@ -178,7 +195,7 @@ ready-to-use Vietnamese IME setup.
 Installed defaults:
 
 * Fcitx5 addon: /usr/lib/x86_64-linux-gnu/fcitx5/vietnamesekey.so
-* Input methods: vietnamesekey-telex and vietnamesekey-vni
+* Input methods: vietnamesekey-telex and vietnamesekey-raw
 * System environment: /etc/environment.d/80-fcitx5-vietnamesekey.conf
 * System Fcitx5 profile: /etc/xdg/fcitx5/profile
 * Default IM: vietnamesekey-telex
@@ -258,7 +275,7 @@ Installed-Size: ${installed_size}
 Homepage: ${HOMEPAGE}
 Description: Full VietnameseKey Fcitx5 setup with standard US keyboard layout
  VietnameseKey Full installs the optimized VietnameseKey Fcitx5 addon,
- Telex and VNI input method metadata, Fcitx5 runtime dependencies, and
+ Telex and Raw input method metadata, Fcitx5 runtime dependencies, and
  system defaults for a ready-to-use Vietnamese IME setup using the standard
  US keyboard layout (XKB us).
 EOF

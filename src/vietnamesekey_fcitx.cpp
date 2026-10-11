@@ -9,11 +9,9 @@
 #include <fcitx/instance.h>
 #include <fcitx-utils/key.h>
 #include <fcitx-utils/keysym.h>
-#include <array>
 #include <string>
 #include <string_view>
 #include <vector>
-#include <chrono>
 #include <cctype>
 #include <memory>
 #include <fcitx/inputpanel.h>
@@ -57,59 +55,14 @@ class VietnameseKeyEngine;
 
 class VietnameseKeyContext : public fcitx::InputContextProperty {
 public:
-    struct KeyEventItem {
-        KeyEventItem() : sym(FcitxKey_None), states(0), mode(0) {}
-        KeyEventItem(FcitxKeySym s, fcitx::KeyStates st, uint8_t m)
-            : sym(s), states(st), mode(m) {}
-        FcitxKeySym sym;
-        fcitx::KeyStates states;
-        uint8_t mode;
-    };
-
-    VietnameseKeyContext(VietnameseKeyEngine* engine, fcitx::InputContext* ic)
-        : engine_(engine), ic_(ic) {
-        m_cached_str.reserve(256);
-    }
+    VietnameseKeyContext() { m_cached_str.reserve(256); }
 
     ShadowEngine& engine() { return engine_state_; }
 
     void reset() {
         engine_state_.reset();
-        clearQueue();
         clearBuffers();
-        lastResetMs = 0;
-        resetSpamCount = 0;
         if (clearTimer) clearTimer.reset();
-    }
-
-    // Queue
-    bool enqueue(const KeyEventItem& item) {
-        if (queue_size_ == kQueueCapacity) return false;
-        queue_[queue_tail_] = item;
-        queue_tail_ = (queue_tail_ + 1) % kQueueCapacity;
-        ++queue_size_;
-        return true;
-    }
-    bool dequeue(KeyEventItem& item) {
-        if (queue_size_ == 0) return false;
-        item = queue_[queue_head_];
-        queue_head_ = (queue_head_ + 1) % kQueueCapacity;
-        --queue_size_;
-        return true;
-    }
-    void clearQueue() {
-        queue_head_ = 0;
-        queue_tail_ = 0;
-        queue_size_ = 0;
-        draining_ = false;
-    }
-    bool isDraining() const { return draining_; }
-    void setDraining(bool v) { draining_ = v; }
-    size_t queueSize() const { return queue_size_; }
-    bool peek(KeyEventItem& out) const {
-        if (queue_size_ == 0) return false;
-        out = queue_[queue_head_];
-        return true;
     }
 
     // Buffers per-IC — fixes B3 race where global m_utf8 was shared
@@ -127,16 +80,20 @@ public:
         m_utf8[0] = '\0';
     }
 
-    // Debounce for B1
-    uint64_t lastResetMs = 0;
-    int resetSpamCount = 0;
+    // 15ms one-shot that clears the floating panel for non-native clients
     std::unique_ptr<fcitx::EventSourceTime> clearTimer;
 
     // Cached client profile — ic->program()/display() are immutable per IC.
     // display() returns by value (allocs); computing once removes 2-3 mallocs per keystroke.
     bool profileChecked = false;
     bool brokenBase = false;   // program-name based (zalo/wine/electron/code/chrome)
-    bool x11Display = false;   // display starts with x11 (needs live capability check)
+    bool x11Display = false;   // display reports x11 (needs live capability check)
+
+    // fcitx5 reports the display as "x11::0" (type:string). One predicate for both branches
+    // below — they used to disagree (bare "x11" vs "x11:"), misclassifying clients.
+    static bool is_x11_display(const std::string& disp) {
+        return disp.find("x11:") != std::string::npos;
+    }
 
     void initClientProfile(fcitx::InputContext* ic) {
         if (profileChecked) return;
@@ -149,19 +106,23 @@ public:
                 buf[i] = static_cast<char>(::tolower(static_cast<unsigned char>(prog[i])));
             }
             const std::string_view lower(buf, n);
-            for (const char* b : {"zalo", "wine", "electron"}) {
+            // NOTE: "wine" is deliberately NOT in this list. Every Wine/Proton process
+            // reports a program name containing "wine", so including it forced the
+            // isolated floating-panel path on EVERY Proton game — keys got parked in the
+            // panel and never reached the game (movement/controls dead). The panel is
+            // only a fallback for clients that *claim* preedit support but render it
+            // wrong, which is a real problem for Zalo/Electron and not for games.
+            for (const char* b : {"zalo", "electron"}) {
                 if (lower.find(b) != std::string_view::npos) { brokenBase = true; return; }
             }
-            const std::string disp = ic->display();
-            x11Display = disp.find("x11") != std::string::npos;
+            x11Display = is_x11_display(ic->display());
             if (x11Display &&
                 (lower.find("code") != std::string_view::npos ||
                  lower.find("chrome") != std::string_view::npos)) {
                 brokenBase = true;
             }
         } else {
-            const std::string disp = ic->display();
-            x11Display = disp.find("x11:") != std::string::npos;
+            x11Display = is_x11_display(ic->display());
         }
     }
 
@@ -177,15 +138,7 @@ public:
     }
 
 private:
-    VietnameseKeyEngine* engine_;
-    fcitx::InputContext* ic_;
     ShadowEngine engine_state_;
-    static constexpr size_t kQueueCapacity = 64;
-    std::array<KeyEventItem, kQueueCapacity> queue_{};
-    size_t queue_head_ = 0;
-    size_t queue_tail_ = 0;
-    size_t queue_size_ = 0;
-    bool draining_ = false;
     char m_utf8[256]{};
     size_t m_utf8n = 0;
     std::string m_cached_str;
@@ -195,8 +148,8 @@ class VietnameseKeyEngine final : public fcitx::InputMethodEngineV2 {
 public:
     explicit VietnameseKeyEngine(fcitx::Instance* instance)
         : instance_(instance),
-          factory_([this](fcitx::InputContext& ic) {
-              return new VietnameseKeyContext(this, &ic);
+          factory_([](fcitx::InputContext&) {
+              return new VietnameseKeyContext();
           }) {
         instance_->inputContextManager().registerProperty("vietnamesekey_state", &factory_);
     }
@@ -212,13 +165,23 @@ public:
             .setLabel("vi")
             .setConfigurable(false);
 
-        entries.emplace_back("vietnamesekey-vni",
-                             "VietnameseKey-VNI",
+        // VNI (mode 1) is still implemented and tested in ShadowEngine, but is no
+        // longer exposed as an input method: it was unusable (the user reported it
+        // behaving like Telex) and Telex covers their typing. Re-enabling it is just
+        // adding this entry plus the matching .conf file.
+        //
+        // Gaming / raw pass-through. Consumes NOTHING: every key goes straight to the
+        // client, no composition, no preedit, no floating panel. Select this IM while a
+        // game has the keyboard — Proton/Wine games talk XIM, which has no client-side
+        // preedit, so Telex would park keystrokes in the input panel and the game
+        // would never see WASD.
+        entries.emplace_back("vietnamesekey-raw",
+                             "VietnameseKey-Raw (gaming)",
                              "vi",
                              "vietnamesekey");
         entries.back()
             .setIcon("vietnamesekey")
-            .setLabel("vi")
+            .setLabel("raw")
             .setConfigurable(false);
         return entries;
     }
@@ -231,8 +194,14 @@ public:
         fcitx::InputContext* ic = ke.inputContext();
         if (!ic) return;
 
-        const uint8_t mode =
-            (entry.uniqueName() == "vietnamesekey-vni") ? 1u : 0u;
+        // Raw pass-through: drop any pending composition and forward every key.
+        if (entry.uniqueName() == "vietnamesekey-raw") {
+            if (auto* c = ic->propertyFor(&factory_)) c->engine().reset();
+            return;   // not consumed -> client receives the key verbatim
+        }
+
+        // Only Telex is exposed, so the engine is always driven in mode 0.
+        constexpr uint8_t mode = 0;
 
         FcitxKeySym            sym    = ke.key().sym();
         const fcitx::KeyStates states = ke.key().states();
@@ -247,48 +216,33 @@ public:
         auto* ctx = ic->propertyFor(&factory_);
         if (!ctx) return;
 
-        VietnameseKeyContext::KeyEventItem item(sym, states, mode);
-        // Giữ hộp nổi cho non-native, xử lý đồng bộ từng phím để không nnhnha
-        // Queue per-IC chỉ dùng cho burst Wayland (nhiều phím trong 1 tick), còn lại xử lý ngay
-        bool accepted = processQueuedKey(ic, ctx, item);
-        if (accepted) {
+        if (processKey(ic, ctx, sym, states, mode)) {
             ke.filterAndAccept();
-        }
-        // Nếu có burst tồn đọng (do Wayland batch gửi nhiều key trước khi fcitx kịp xử lý), drain gộp để không rớt
-        // drainQueue đã coalesce commit+show cho non-native thành 1 IPC
-        if (ctx->queueSize() > 0) {
-            bool extra = drainQueue(ic, ctx);
-            if (extra) ke.filterAndAccept();
         }
     }
 
-    void activate(const fcitx::InputMethodEntry&, fcitx::InputContextEvent&) override {}
+    // Switching into this addon (e.g. Telex -> Raw) must not leave a stale floating
+    // panel behind: for a game that panel is the last thing on screen and it would
+    // never be cleared because no further key is ever consumed.
+    void activate(const fcitx::InputMethodEntry&, fcitx::InputContextEvent& ev) override {
+        auto* ic = ev.inputContext();
+        if (!ic) return;
+        auto* ctx = ic->propertyFor(&factory_);
+        if (!ctx) return;
+        if (!ctx->engine().has_composition() && ctx->utf8n() == 0 && !ctx->clearTimer) return;
+        flush(ic, ctx);
+    }
 
     void reset(const fcitx::InputMethodEntry&,
                fcitx::InputContextEvent& ev) override {
         auto* ic = ev.inputContext();
         if (!ic) return;
-        auto* ctx = ic->propertyFor(&factory_);
-        if (!ctx) return;
-        if (!ctx->engine().has_composition()) return;
-
-        // B1 FIX: debounce reset spam from broken clients (Zalo Wine issues XmbResetIC 10+ times per key)
-        // Legitimate focus change comes as single reset; spam comes in bursts <300ms
-        auto now = std::chrono::steady_clock::now();
-        uint64_t nowMs = static_cast<uint64_t>(
-            std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count());
-        if (ctx->lastResetMs != 0 && nowMs - ctx->lastResetMs < 300) {
-            ctx->resetSpamCount++;
-            if (ctx->resetSpamCount < 5) {
-                return; // ignore spam
-            }
-            // after 5 rapid resets treat as legitimate (e.g., real focus change after spam)
-        } else {
-            ctx->resetSpamCount = 0;
-        }
-        ctx->lastResetMs = nowMs;
-        // Real reset (focus change, arrow keys via fcitx) should commit pending word like Unikey
-        flush(ic, ctx);
+        // Real reset (focus change, arrow keys via fcitx) should commit pending word like Unikey.
+        // flush() already no-ops when there is nothing pending.
+        // NOTE: the old 300ms/5-strike "B1" debounce here was unreachable — the
+        // !has_composition() guard ran first and the first reset already flushed, so
+        // resetSpamCount never incremented. Dropped as dead weight.
+        flush(ic);
     }
 
     void deactivate(const fcitx::InputMethodEntry& entry,
@@ -307,44 +261,8 @@ private:
     fcitx::Instance* instance_;
     fcitx::FactoryFor<VietnameseKeyContext> factory_;
 
-    bool drainQueue(fcitx::InputContext* ic, VietnameseKeyContext* ctx) {
-        if (ctx->isDraining()) return false;
-        ctx->setDraining(true);
-        bool accepted = false;
-        VietnameseKeyContext::KeyEventItem item;
-        while (ctx->dequeue(item)) {
-            // Coalesce cho non-native: nếu item hiện là word-break commit và còn item sau trong queue
-            // thì commit nhưng không clear panel (để show sau ghi đè luôn, giảm 1 IPC, tránh rớt chữ)
-            bool isWordBreak = ShadowEngine::is_word_break(static_cast<char32_t>(item.sym), item.mode);
-            bool hasNext = ctx->queueSize() > 0;
-            bool isNonNative = !has_client_preedit(ic, ctx);
-            if (isWordBreak && hasNext && isNonNative && ctx->engine().has_composition()) {
-                // Commit gộp: word+space nhưng giữ panel
-                char32_t obuf[33];
-                size_t olen = 0;
-                ctx->engine().get_composition(obuf, olen);
-                if (olen < 32) obuf[olen++] = static_cast<char32_t>(item.sym);
-                // encode và commit, chỉ reset engine, không clear panel
-                ctx->encode(obuf, olen);
-                if (ctx->utf8n() > 0) ic->commitString(ctx->cachedStr());
-                ctx->engine().reset();
-                ctx->clearBuffers();
-                // không gọi clear_preedit, để show tiếp theo ghi đè panel luôn
-                accepted = true;
-                continue;
-            }
-            bool cur = processQueuedKey(ic, ctx, item);
-            accepted = cur || accepted;
-        }
-        ctx->setDraining(false);
-        return accepted;
-    }
-
-    bool processQueuedKey(fcitx::InputContext* ic, VietnameseKeyContext* ctx,
-                          const VietnameseKeyContext::KeyEventItem& item) {
-        const FcitxKeySym sym = item.sym;
-        const fcitx::KeyStates states = item.states;
-        const uint8_t mode = item.mode;
+    bool processKey(fcitx::InputContext* ic, VietnameseKeyContext* ctx,
+                    FcitxKeySym sym, fcitx::KeyStates states, uint8_t mode) {
         auto& engine = ctx->engine();
 
         // 1. Pass through modifier combos untouched
@@ -376,7 +294,7 @@ private:
         // 4. Backspace inside composition — delegate to ShadowEngine smart backspace
         if (sym == FcitxKey_BackSpace) {
             if (engine.has_composition()) {
-                char32_t obuf[32];
+                char32_t obuf[ShadowEngine::capacity];
                 size_t   olen = 0;
                 engine.process_key(8, mode, obuf, olen);
                 if (olen > 0) {
@@ -392,10 +310,10 @@ private:
         // 5. Word break (Space, punctuation): append to composition and commit together
         if (ShadowEngine::is_word_break(static_cast<char32_t>(sym), mode)) {
             if (engine.has_composition()) {
-                char32_t obuf[33];
+                char32_t obuf[ShadowEngine::capacity + 1];
                 size_t   olen = 0;
                 engine.get_composition(obuf, olen);
-                if (olen < 32) {
+                if (olen < ShadowEngine::capacity + 1) {
                     obuf[olen++] = static_cast<char32_t>(sym);
                 }
                 commit_buf(ic, ctx, obuf, olen);
@@ -411,7 +329,7 @@ private:
         }
 
         // 7. Main composition path
-        char32_t obuf[32];
+        char32_t obuf[ShadowEngine::capacity];
         size_t   olen = 0;
         const bool consumed =
             engine.process_key(static_cast<char32_t>(sym), mode, obuf, olen);
@@ -479,19 +397,26 @@ private:
             ctx->clearBuffers();
             // Hủy timer cũ nếu có
             ctx->clearTimer.reset();
-            // Đặt timer 40ms để clear panel nếu không có phím mới (tránh kẹt chữ cũ)
-            // Lưu ý: ctx có thể bị hủy nếu InputContext đóng, nên kiểm tra ic còn valid
+            // Đặt timer 15ms để clear panel nếu không có phím mới (tránh kẹt chữ cũ).
+            // ic->watch() là weak handle: nếu InputContext bị hủy trước khi timer nổ
+            // (client đóng tab, đổi IM) thì get() trả nullptr thay vì deref vùng nhớ đã free.
+            auto icWatch = ic->watch();
             auto* self = this;
+            // Bound timer coalescing to 1ms; sd-event accuracy=0 defaults to 250ms.
             ctx->clearTimer = instance_->eventLoop().addTimeEvent(
-                CLOCK_MONOTONIC, 15000, 0,
-                [ic, self](fcitx::EventSourceTime*, uint64_t) {
-                    if (!ic) return false;
-                    auto* c = ic->propertyFor(&self->factory_);
+                CLOCK_MONOTONIC, fcitx::now(CLOCK_MONOTONIC) + 15000, 1000,
+                [icWatch, self](fcitx::EventSourceTime* source, uint64_t) {
+                    fcitx::InputContext* live = icWatch.get();
+                    if (!live) return false;
+                    auto* c = live->propertyFor(&self->factory_);
                     if (c) {
                         if (!c->engine().has_composition()) {
-                            self->clear_preedit(ic);
+                            self->clear_preedit(live);
                         }
-                        c->clearTimer.reset();
+                        // Không reset clearTimer ở đây để tránh tự hủy timer trong callback
+                        // Timer là one-shot (return false), sẽ được hủy khi ctx bị hủy
+                        // hoặc khi show()/commit tiếp theo ghi đè
+                        (void)source;
                     }
                     return false;
                 });
@@ -504,13 +429,17 @@ private:
             ctx = ic->propertyFor(&factory_);
         }
         if (ctx && ctx->engine().has_composition()) {
-            char32_t obuf[32];
+            char32_t obuf[ShadowEngine::capacity];
             size_t olen = 0;
             ctx->engine().get_composition(obuf, olen);
             if (olen > 0) {
                 ctx->encode(obuf, olen);
                 ic->commitString(ctx->cachedStr());
             }
+            wipe(ic, ctx);
+        } else if (ctx && ctx->clearTimer) {
+            // A just-committed word can still have a deferred floating panel.
+            // Clear it on focus/IM switches even though the engine is empty.
             wipe(ic, ctx);
         }
     }

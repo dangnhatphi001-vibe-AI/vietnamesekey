@@ -4,7 +4,7 @@
 
 - Yêu cầu C++26 cho addon, tests và benchmark; CMake tối thiểu 3.30.
 - Đồng bộ build scripts, Debian/Arch metadata và CI với toolchain mới. CI Debian dùng Ubuntu 26.04 và GCC 15.
-- Đăng ký hai phương thức Telex và Raw; VNI chỉ còn trong lõi và kiểm thử.
+- Đăng ký Telex để gõ tiếng Việt và Raw dành cho game Steam/Proton: chuyển tiếp phím nguyên bản, không xử lý Telex hay tạo preedit. VNI chỉ còn trong lõi và kiểm thử.
 - Sửa profile gói full để có bàn phím nền Keyboard US trước Telex/Raw.
 - Script build/cài chạy tests và sao lưu addon trước khi thay thế.
 

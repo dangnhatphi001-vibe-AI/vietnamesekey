@@ -2,7 +2,7 @@
 
 Bộ gõ tiếng Việt cho **Fcitx5 trên Linux**, viết bằng **C++26**. Phiên bản hiện tại: **3.1.0**.
 
-VietnameseKey cung cấp **Telex** để gõ tiếng Việt và **Raw** để chuyển tiếp phím nguyên bản khi chơi game hoặc dùng phím tắt. Engine giữ trạng thái riêng cho từng ô nhập, hiển thị preedit trong ứng dụng khi client hỗ trợ và dùng bảng nổi trong các trường hợp fallback.
+VietnameseKey cung cấp **Telex** để gõ tiếng Việt và **Raw** dành cho chơi game trên **Steam/Proton**, chuyển tiếp phím nguyên bản để các phím điều khiển không bị xử lý thành Telex. Engine giữ trạng thái riêng cho từng ô nhập, hiển thị preedit trong ứng dụng khi client hỗ trợ và dùng bảng nổi trong các trường hợp fallback.
 
 ## Tính năng
 
@@ -62,7 +62,21 @@ fcitx5-remote -s vietnamesekey-telex
 fcitx5-remote -n
 ```
 
-Chuyển sang Raw bằng `fcitx5-remote -s vietnamesekey-raw`. Có thể chọn cả hai phương thức từ menu Fcitx hoặc phím chuyển phương thức đã cấu hình.
+### Raw cho game Steam/Proton
+
+Chọn **VietnameseKey — Raw** trước khi vào game trên Steam, đặc biệt các game Windows chạy qua Proton. Raw chuyển tiếp phím cho game, không ghép chữ Telex, đặt dấu hay tạo preedit; các tổ hợp dùng để di chuyển và điều khiển không bị biến thành tiếng Việt.
+
+```bash
+fcitx5-remote -s vietnamesekey-raw
+```
+
+Khi quay lại gõ tiếng Việt, chuyển sang Telex:
+
+```bash
+fcitx5-remote -s vietnamesekey-telex
+```
+
+Có thể chuyển giữa hai phương thức từ menu Fcitx hoặc phím chuyển phương thức đã cấu hình. Raw là chế độ chọn thủ công; không tự phát hiện Steam/Proton hoặc tự chuyển khi mở game.
 
 ### Build nhanh cho máy phát triển
 
